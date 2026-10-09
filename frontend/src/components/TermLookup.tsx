@@ -60,7 +60,7 @@ export default function TermLookup({
       <div className="min-w-0">
         <p className="text-xs font-semibold text-slate-700 flex items-center gap-2"><BookOpen size={14}/>Source term lookup</p>
         {term
-          ? <p className="text-xs text-slate-500 mt-1 break-words">Selected: <span className="font-medium text-slate-700">{term}</span></p>
+          ? <p className="text-xs text-slate-500 mt-1 break-words">Selected: <span className="font-medium text-slate-700">{term}</span>. Now press the lookup button.</p>
           : <p className="text-xs text-slate-400 mt-1">Highlight a term or short phrase in the patient encounter notes above.</p>}
       </div>
       <button type="button" className="btn !text-xs" disabled={disabled || busy || !term} onClick={lookup}>
