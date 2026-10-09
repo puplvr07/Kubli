@@ -87,6 +87,23 @@ async def privacy_boundary(request: Request, call_next):
 async def validation_error(request: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={'detail': 'Invalid fields. Use the complete record schema, numeric values for vitals, and explicit confirmation when saving.'})
 
+@app.exception_handler(llm.ModelGenerationError)
+async def model_generation_error(request: Request, exc: llm.ModelGenerationError):
+    messages = {
+        'unreachable': 'Ollama is not running. Start the local Ollama service and retry.',
+        'model_missing': f'The configured local model is not installed. Run: ollama pull {llm.MODEL}',
+        'timeout': 'The local model timed out. Check available RAM or select a smaller OLLAMA_MODEL, then retry.',
+        'truncated': 'The local model response was cut off. Please retry.',
+        'invalid_json': 'The local model returned invalid JSON. Please retry.',
+        'schema_validation': 'The local model returned an incomplete response. Please retry.',
+        'citation_validation': 'The local model returned citations that could not be verified. Please retry.',
+        'answer_validation': 'The local model returned an answer outside the requested format. Please retry.',
+    }
+    return JSONResponse(status_code=502, content={
+        'status': 'model_error',
+        'detail': messages.get(exc.reason, 'The local model returned an invalid response. Please try again.'),
+    })
+
 @app.exception_handler(Exception)
 async def unexpected_error(request: Request, exc: Exception):
     # Never serialize/log exception bodies: parsers or validation may contain patient text.

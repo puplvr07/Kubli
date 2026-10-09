@@ -7,7 +7,7 @@ export interface RecordDraft {
 }
 export interface Warning { field: string; message: string }
 export interface DeidFlag { id: string; kind: string; text: string; start: number; end: number; field?: string }
-export interface Citation { chunk_id: string; filename: string; page: number; heading: string; location_type?: string; snippet: string; context: string }
+export interface Citation { chunk_id: string; filename: string; page: number; heading: string; location_type?: string; quote?: string; snippet: string; context: string }
 export interface LibraryDocument { id: string; title: string; tag: string; timestamp: string; chunks: number; sample: boolean }
 export interface SavedRecord { id: string; timestamp: string; chief_complaint: string | null }
 export interface Status {

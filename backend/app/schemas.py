@@ -1,5 +1,5 @@
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
+from typing import Literal, Self
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, allow_inf_nan=False, str_max_length=30000)
@@ -53,6 +53,25 @@ class SaveInput(StrictModel):
 class AskInput(StrictModel):
     question: str = Field(min_length=1, max_length=2000)
     scope: list[Literal['notes', 'guidelines', 'textbook']] = Field(default_factory=lambda: ['notes', 'guidelines', 'textbook'])
+
+class RAGCitation(StrictModel):
+    chunk_id: str = Field(min_length=1, max_length=100)
+    quote: str = Field(min_length=1, max_length=1800)
+
+class RAGResponse(StrictModel):
+    status: Literal['answered', 'not_covered']
+    answer: str = Field(min_length=1, max_length=4000)
+    citations: list[RAGCitation] = Field(max_length=4)
+
+    @model_validator(mode='after')
+    def validate_status_payload(self) -> Self:
+        if not self.answer.strip():
+            raise ValueError('answer cannot be blank')
+        if self.status == 'answered' and not self.citations:
+            raise ValueError('answered responses require at least one citation')
+        if self.status == 'not_covered' and self.citations:
+            raise ValueError('not_covered responses cannot include citations')
+        return self
 
 class CompletenessInput(StrictModel):
     record: Record

@@ -4,13 +4,13 @@ from app.services.parsing import PageText, chunk_pages, parse_file
 from app.services.rag import rank, answer, missing_items, NOT_COVERED
 from app.services import llm
 from app.services.store import Vault
-from app.schemas import empty_record
+from app.schemas import empty_record, RAGCitation, RAGResponse
 from fastapi.testclient import TestClient
 from app.main import app
 
 
 def make_chunk(text='Document: allergies as reported.', **overrides):
-    return dict(id='chunk1', document_id='doc1', text=text, filename='fever.txt', page=3, heading='Fever', tag='guidelines', embedding=[1., 0.], embedding_model=llm.EMBED_MODEL, **overrides)
+    return dict(id='chunk1', document_id='doc1', text=text, filename='fever.txt', page=3, heading='Fever', tag='guidelines', embedding=[1., 0.], embedding_model=llm.EMBEDDING_PROFILE, **overrides)
 
 
 def test_chunk_pages_exact_slices_and_page_numbers():
@@ -36,28 +36,34 @@ def test_plain_text_and_docx_sections():
     assert pages[-1].heading == 'Exam'
 
 
-def test_retrieval_correct_source_and_no_match():
+def test_retrieval_embedding_first_and_scope_filter():
     fever = make_chunk('Fever checklist. Document: temperature in the stated unit.')
     chest = dict(make_chunk('Chest pain checklist. Document: blood pressure.'), id='chest', filename='chest.pdf', page=9, embedding=[0.,1.])
     result = rank([chest, fever], 'How should fever temperature be documented?', [1.,0.], ['guidelines'])
     assert result[0]['filename'] == 'fever.txt' and result[0]['page'] == 3
-    assert rank([fever], 'What is the insulin regimen?', [1.,0.], ['guidelines']) == []
+    # Zero keyword overlap is still eligible when the embedding points to the chunk.
+    assert rank([fever], 'How do I capture thermal readings?', [1.,0.], ['guidelines'])[0]['id'] == 'chunk1'
     assert rank([fever], 'fever', [1.,0.], ['textbook']) == []
 
 
-def test_grounded_answers_discard_invented_quotes(tmp_path, monkeypatch):
+def test_grounded_answer_and_valid_not_covered(tmp_path, monkeypatch):
     vault = Vault(tmp_path); token = vault.unlock('strong password')
     vault.index = [make_chunk('Fever: document temperature in the stated unit.')]
-    async def embedding(texts): return [[1., 0.] for _ in texts]
-    async def hallucination(*args, **kwargs): return {'covered': True, 'evidence': [{'chunk_id': 'chunk1', 'snippet': 'Fever should be treated with invented therapy.'}]}
-    monkeypatch.setattr(llm, 'embed', embedding); monkeypatch.setattr(llm, 'generate_json', hallucination)
-    assert asyncio.run(answer(vault, 'fever temperature', ['guidelines'], token)) == {'answer': NOT_COVERED, 'citations': []}
-    async def supported(*args, **kwargs): return {'covered': True, 'evidence': [{'chunk_id': 'chunk1', 'snippet': 'Fever: document temperature in the stated unit.'}]}
-    monkeypatch.setattr(llm, 'generate_json', supported)
+    async def embedding(question): return [1., 0.]
+    responses = [RAGResponse(status='answered', answer='Record the temperature in the stated unit.',
+                             citations=[RAGCitation(chunk_id='chunk1', quote='fever:   DOCUMENT temperature in the stated unit.')]),
+                 RAGResponse(status='not_covered', answer=NOT_COVERED, citations=[])]
+    async def generated(prompt, schema_model, validator_extra=None, max_attempts=2, *, data):
+        value = responses.pop(0)
+        value = validator_extra(value) if validator_extra else value
+        return llm.ValidatedGeneration(value=value, metadata={'done_reason': 'stop', 'eval_count': 40})
+    monkeypatch.setattr(llm, 'embed_query', embedding); monkeypatch.setattr(llm, 'generate_validated', generated)
     result = asyncio.run(answer(vault, 'fever temperature', ['guidelines'], token))
     assert result['citations'][0]['snippet'] in vault.index[0]['text']
     assert result['citations'][0]['page'] == 3
-    assert asyncio.run(answer(vault, 'galaxy orbital mechanics', ['guidelines'], token))['answer'] == NOT_COVERED
+    assert result['status'] == 'answered'
+    uncovered = asyncio.run(answer(vault, 'galaxy orbital mechanics', ['guidelines'], token))
+    assert uncovered['status'] == 'not_covered' and uncovered['answer'] == NOT_COVERED
     vault.close()
 
 

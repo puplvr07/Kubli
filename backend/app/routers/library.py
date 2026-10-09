@@ -28,9 +28,10 @@ async def prepare_document(filename: str, pages, tag: str, sample: bool = False,
         if vault is not None:
             vault.authorize(token, touch=False)
         batch = pieces[start:start + 16]
-        vectors.extend(valid_vectors(await llm.embed([c['text'] for c in batch]), len(batch)))
+        vectors.extend(valid_vectors(await llm.embed_documents([c['text'] for c in batch]), len(batch)))
     for piece, embedding in zip(pieces, vectors):
-        piece.update(id=str(uuid4()), document_id=document_id, tag=tag, embedding=embedding, embedding_model=llm.EMBED_MODEL)
+        piece.update(id=str(uuid4()), document_id=document_id, tag=tag, embedding=embedding,
+                     embedding_model=llm.EMBEDDING_PROFILE)
     document = {'id': document_id, 'title': filename, 'tag': tag, 'timestamp': datetime.now(timezone.utc).isoformat(timespec='seconds'), 'chunks': len(pieces), 'sample': sample}
     return document, pieces
 
@@ -97,8 +98,9 @@ async def reindex(vault=Depends(unlocked)):
     for start in range(0, len(snapshot), 16):
         vault.authorize(token, touch=False)
         batch = snapshot[start:start + 16]
-        vectors = valid_vectors(await llm.embed([chunk['text'] for chunk in batch]), len(batch))
-        replacements.extend(dict(chunk, embedding=vector, embedding_model=llm.EMBED_MODEL) for chunk, vector in zip(batch, vectors))
+        vectors = valid_vectors(await llm.embed_documents([chunk['text'] for chunk in batch]), len(batch))
+        replacements.extend(dict(chunk, embedding=vector, embedding_model=llm.EMBEDDING_PROFILE)
+                            for chunk, vector in zip(batch, vectors))
     vault.authorize(token, touch=False)
     if {c['id'] for c in snapshot} != {c['id'] for c in vault.index}:
         raise HTTPException(409, 'Library changed while reindexing. Retry after indexing/deletion finishes.')

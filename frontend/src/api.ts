@@ -1,6 +1,9 @@
 const BASE = 'http://127.0.0.1:8000'
 let session: string | null = null
 let onLocked: () => void = () => {}
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) { super(message) }
+}
 export function setSession(token: string | null) { session = token }
 export function setLockHandler(handler: () => void) { onLocked = handler }
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -13,7 +16,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (!response.ok) {
     if (response.status === 401 && !path.includes('unlock')) { session = null; onLocked() }
     const data = await response.json().catch(() => ({}))
-    throw new Error(typeof data.detail === 'string' ? data.detail : 'Request could not be completed. Check your fields and retry.')
+    throw new ApiError(typeof data.detail === 'string' ? data.detail : 'Request could not be completed. Check your fields and retry.',
+      response.status, typeof data.status === 'string' ? data.status : undefined)
   }
   return response.json() as Promise<T>
 }

@@ -103,6 +103,9 @@ Supported environment variables (set before starting the backend):
 | --- | --- |
 | `OLLAMA_MODEL` | `qwen2.5:3b-instruct` — must already be pulled locally |
 | `EMBED_MODEL` | `nomic-embed-text` — reindex after changing this |
+| `RAG_TOP_K` | `6` — number of in-scope chunks sent to the answer model; allowed range 1–50 |
+| `RAG_NUM_PREDICT` | `256` — maximum generated tokens for cited answers; allowed range 32–4096 |
+| `RAG_TIMEOUT_SECONDS` | `60` — total time allowed for an answer and its validation retry; allowed range 1–600 |
 | `WHISPER_MODEL` | `small` — multilingual cached model; never downloaded at runtime |
 | `WHISPER_MODEL_PATH` | Optional path to an already downloaded faster-whisper model directory |
 | `WHISPER_CACHE_DIR` | Optional existing cache directory when using `WHISPER_MODEL` |
@@ -129,7 +132,9 @@ Uploads are bounded to 20 MB/file, 30 MB combined, 32 MB including request frami
 
 PDF citations use real page numbers, including pages skipped for having no text. DOCX uses heading-based **sections**, since reliable page layout is unavailable without a document renderer. TXT/MD form-feed characters delimit pages; otherwise the location is page 1. Chunks are approximately 400 tokens using a character estimate with 50-token overlap, never crossing source pages/sections.
 
-Ask searches the selected source types with cosine similarity and a keyword boost. Only literal source quotations selected by the local LLM and verified against retrieved chunks become answers. Click citations to see the exact supporting passage highlighted. If there is no supported evidence, the exact response is **Not covered by your library**. Completeness emits only “Consider documenting…” prompts from explicit `Document:`, `Record:`, or `Consider documenting:` checklist lines; it never supplies diagnoses.
+Ask embeds every chunk in the selected source types, ranks them by cosine similarity, and uses keyword overlap only as a small optional boost. Nomic embeddings use matching `search_document:` and `search_query:` prefixes; run **Reindex** once after upgrading an existing vault to this version. The top retrieved chunk IDs and similarity scores are returned in an internal `_debug` field for local diagnostics and are not displayed in the normal UI.
+
+The answer model receives only the retrieved chunks and must return strict schema-bound JSON. Answered responses are limited to three sentences and require a known chunk ID plus a short quote that is verified after whitespace normalization and case folding. Truncated, malformed, timed-out, or unverifiable model responses are retried once and then shown as a retryable **local model error**; they are never converted to **Not covered by your library**. That exact response is reserved for an empty scoped library or a valid model `not_covered` result. Click citations to inspect the supporting passage. Completeness emits only “Consider documenting…” prompts from explicit `Document:`, `Record:`, or `Consider documenting:` checklist lines; it never supplies diagnoses.
 
 Deletion removes the document and its chunks. Reindex replaces vectors only after all embedding calls succeed. Changing embedding models requires reindexing. Sample library imports are idempotent by sample filename.
 
@@ -145,13 +150,15 @@ npm run build --prefix frontend
 npm audit --prefix frontend
 ```
 
-Ordinary tests use controlled local-model responses to exercise failure handling and grounding. They test numeric boundaries, identifier regexes, wrong-password failure, per-payload salts and authenticated metadata, encrypted chunks/records, index rebuild at unlock, page-preserving parsing/chunking, retrieval, unsupported answers, explicit-save gates, PDF text/pages, blocked external sockets, local-only STT configuration, and missing-model errors. Two real-model tests are opt-in; skipping them does **not** verify inference.
+Ordinary tests use controlled local-model responses to exercise failure handling and grounding. They test numeric boundaries, identifier regexes, wrong-password failure, per-payload salts and authenticated metadata, encrypted chunks/records, index rebuild at unlock, page-preserving parsing/chunking, embedding-first retrieval, malformed/truncated output, citation validation, explicit-save gates, PDF text/pages, blocked external sockets, local-only STT configuration, and missing-model errors. Real-model tests are opt-in; skipping them does **not** verify inference.
 
 After Ollama is running and both models are pulled:
 
 ```bash
-WARDNOTE_LIVE_MODELS=1 python -m pytest backend/tests/test_live_models.py -q
+RUN_LIVE_MODEL_TESTS=1 python -m pytest -m live -q
 ```
+
+The live RAG suite builds four synthetic documents through the real embedding/indexing pipeline. It checks a zero-keyword-overlap paraphrase, a valid uncovered question, five repeated answers, verbatim citations, completion metadata, token-cap headroom, and the configured total timeout. With `RUN_LIVE_MODEL_TESTS=1`, missing Ollama services or models fail the suite instead of skipping it. Raw model text appears only in a failed live-test assertion and is never logged by the application.
 
 Whisper accuracy requires testing with your own fictional multilingual recordings after its weights are present. Browser permissions and microphone hardware cannot be established by mocked STT tests.
 
@@ -194,7 +201,7 @@ Do not use Chromium's network-emulation “offline” mode as a substitute: it b
 - Conservative verbatim extraction may leave explicitly stated facts blank when phrasing/units are ambiguous, and cannot prove the model understood negation perfectly. Always review.
 - No unit conversion; age is years and temperature is Celsius. No clinical dose checking or diagnosis. Lab recognition is limited to common labeled values.
 - Identifier regexes can miss names, addresses, unusual dates, and other identifying details. A clean scan is not proof of anonymization.
-- Citation fidelity is deterministic; relevance still needs human judgment. Lexical gating can reject paraphrased queries. Completeness recognizes explicit checklist lines and simple field/term coverage, so false positives/negatives are possible.
+- Citation fidelity is deterministic; relevance still needs human judgment. Embedding retrieval can rank a semantically unrelated chunk among the top results, so the answer model still has to return a valid `not_covered` result when evidence is absent. Completeness recognizes explicit checklist lines and simple field/term coverage, so false positives/negatives are possible.
 - A single local vault/session is supported. Unlocking invalidates an earlier session. No multi-user management, password change/recovery, synchronization, backup UI, or official-record integrations.
 - Locking discards unsaved drafts. Memory clearing is best effort; full-disk encryption and OS swap policy are outside the app's control.
 - Exported PDFs are **unencrypted**. One-page export reduces font size to a minimum of 8pt; oversized drafts or unsupported glyphs fail clearly instead of truncating content.
