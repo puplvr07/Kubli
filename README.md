@@ -1,4 +1,4 @@
-# WardNote
+# TIBOQ
 
 An offline encounter-drafting and study companion for medical students and interns. Type or dictate a presentation, review a SOAP draft, and explicitly confirm it before saving to an encrypted local vault. Import your own sources for cited questions and documentation prompts.
 
