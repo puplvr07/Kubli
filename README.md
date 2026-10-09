@@ -117,7 +117,7 @@ CPU int8 is enforced for STT. Ollama's host is fixed in application code to loop
 ## Workflow
 
 1. Type an encounter, or **Dictate encounter → Stop**. Correct the editable transcript.
-2. Optionally select a term or short phrase (up to 80 characters) in the encounter text and click **Look up in library**. A verified result is an exact local source excerpt with a citation; uncertain matches stay labeled as potential passages.
+2. Optionally highlight a term or short phrase (up to 80 characters) inside the **Patient encounter notes** textbox and click **Look up in library**. A verified result is an exact local source excerpt with a citation; uncertain matches stay labeled as potential passages.
 3. Click **Structure from text**. Missing data remains null / Not stated. The model gets a strict JSON schema and one retry for invalid output. A deterministic source check removes unsupported excerpts, stripped qualifiers, and ungrounded vitals.
 4. Review or edit **every** amber field. Numeric warnings need explicit source confirmation. These are plausibility checks, not prescribing/lab interpretation.
 5. Remove identifier warnings (recommended), or explicitly choose **Keep**. The heuristic scan is a warning aid, not an anonymization guarantee.
