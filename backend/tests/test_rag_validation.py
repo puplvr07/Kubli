@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app.schemas import RAGResponse
+from app.schemas import RAGModelResponse, RAGResponse
 from app.services import llm
 from app.services.rag import NOT_COVERED, answer, source_evidence
 from app.services.store import Vault
@@ -74,7 +74,7 @@ def test_valid_not_covered_is_accepted(monkeypatch):
 
 
 @pytest.mark.parametrize('bad_source_id', ['known-chunk', 'S99'])
-def test_invalid_source_ids_retry_then_raise_model_error(tmp_path, monkeypatch, bad_source_id):
+def test_invalid_source_ids_are_recovered_from_matching_source_text(tmp_path, monkeypatch, bad_source_id):
     vault = Vault(tmp_path)
     token = vault.unlock('strong password')
     vault.index = [make_chunk()]
@@ -87,6 +87,28 @@ def test_invalid_source_ids_retry_then_raise_model_error(tmp_path, monkeypatch, 
             'status': 'answered', 'answer': make_chunk()['text'],
             'source_ids': [bad_source_id],
         })
+
+    monkeypatch.setattr(llm, 'embed_query', embedding)
+    monkeypatch.setattr(llm, 'local_post', fake_post)
+    result = asyncio.run(answer(vault, 'Why do polar lights occur?', ['textbook'], token))
+    assert result['status'] == 'answered'
+    assert result['answer'] == make_chunk()['text']
+    assert result['citations'][0]['chunk_id'] == 'known-chunk'
+    vault.close()
+
+
+@pytest.mark.parametrize('source_ids', [['S1'], ['S99']])
+def test_unsupported_prose_still_fails_closed(tmp_path, monkeypatch, source_ids):
+    vault = Vault(tmp_path)
+    token = vault.unlock('strong password')
+    vault.index = [make_chunk()]
+
+    async def embedding(question):
+        return [1.0, 0.0]
+
+    async def fake_post(path, body, timeout_seconds=180):
+        return ollama_result({'status': 'answered', 'answer': 'Saturn has icy rings.',
+                              'source_ids': source_ids})
 
     monkeypatch.setattr(llm, 'embed_query', embedding)
     monkeypatch.setattr(llm, 'local_post', fake_post)
@@ -130,7 +152,7 @@ def test_backend_selects_source_and_exact_quote_when_model_omits_id(tmp_path, mo
     ('Charged particles make every aurora green.', 'S1'),
     ('The aurora appears when charged particles interact with the upper atmosphere.', 'S2'),
 ])
-def test_partial_claims_and_unrelated_citations_fail_closed(tmp_path, monkeypatch, answer_text, source_id):
+def test_generated_claims_are_replaced_by_exact_source_text(tmp_path, monkeypatch, answer_text, source_id):
     vault = Vault(tmp_path)
     token = vault.unlock('strong password')
     vault.index = [make_chunk(), dict(make_chunk(), id='other-chunk',
@@ -145,10 +167,23 @@ def test_partial_claims_and_unrelated_citations_fail_closed(tmp_path, monkeypatc
 
     monkeypatch.setattr(llm, 'embed_query', embedding)
     monkeypatch.setattr(llm, 'local_post', fake_post)
-    with pytest.raises(llm.ModelGenerationError) as failure:
-        asyncio.run(answer(vault, 'Why do auroras occur?', ['textbook'], token))
-    assert failure.value.reason == 'answer_validation'
+    result = asyncio.run(answer(vault, 'Why do auroras occur?', ['textbook'], token))
+    assert result['status'] == 'answered'
+    assert result['answer'] == make_chunk()['text']
+    assert result['citations'][0]['snippet'] == make_chunk()['text']
+    assert 'green' not in result['answer'].lower()
     vault.close()
+
+
+@pytest.mark.parametrize('payload', [
+    {'answer': 'Charged particles interact with the upper atmosphere.', 'source_id': 'S1'},
+    {'status': 'answer', 'response': 'Charged particles interact with the upper atmosphere.',
+     'citations': [{'chunk_id': 'S1'}], 'extra_comment': 'ignored'},
+])
+def test_small_model_shape_is_normalized(payload):
+    result = RAGModelResponse.model_validate(payload)
+    assert result.status == 'answered'
+    assert result.source_ids == ['S1']
 
 
 def test_genuine_missing_coverage_keeps_refusal(tmp_path, monkeypatch):

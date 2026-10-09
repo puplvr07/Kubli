@@ -76,14 +76,46 @@ class RAGResponse(StrictModel):
 
 class RAGModelResponse(StrictModel):
     """Small model output; the backend attaches exact citation excerpts."""
+    model_config = ConfigDict(extra='ignore', strict=True, allow_inf_nan=False, str_max_length=30000)
     status: Literal['answered', 'not_covered']
-    answer: str = Field(min_length=1, max_length=4000)
+    answer: str = Field(default='', max_length=4000)
     source_ids: list[str] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_small_model_shape(cls, value):
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if 'answer' not in data and isinstance(data.get('response'), str):
+            data['answer'] = data['response']
+        answer = data.get('answer', '')
+        status = str(data.get('status', '')).strip().lower().replace(' ', '_')
+        if status in {'answer', 'covered', 'supported'}:
+            data['status'] = 'answered'
+        elif status in {'notcovered', 'unanswered', 'unsupported'}:
+            data['status'] = 'not_covered'
+        elif not status and isinstance(answer, str) and answer.strip():
+            data['status'] = ('not_covered' if answer.strip().casefold() ==
+                              'not covered by your library'.casefold() else 'answered')
+        if 'source_ids' not in data:
+            source = data.get('source_id') or data.get('chunk_id')
+            if isinstance(source, str):
+                data['source_ids'] = [source]
+            else:
+                citations = data.get('citations')
+                if isinstance(citations, list):
+                    data['source_ids'] = [item.get('source_id') or item.get('chunk_id')
+                                          for item in citations if isinstance(item, dict)
+                                          and isinstance(item.get('source_id') or item.get('chunk_id'), str)]
+        if isinstance(data.get('source_ids'), str):
+            data['source_ids'] = [data['source_ids']]
+        if data.get('status') == 'not_covered':
+            data['source_ids'] = []
+        return data
 
     @model_validator(mode='after')
     def validate_status_payload(self) -> Self:
-        if not self.answer.strip():
-            raise ValueError('answer cannot be blank')
         if self.status == 'not_covered' and self.source_ids:
             raise ValueError('not_covered responses cannot include sources')
         return self
