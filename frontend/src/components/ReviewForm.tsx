@@ -22,11 +22,18 @@ export function updateAt(record: RecordDraft, path: string, raw: string, kind: s
   else (result as unknown as { [key: string]: unknown })[a] = value
   return result
 }
+const groups = [
+  { title: 'Patient details', note: 'As stated in the encounter', paths: ['patient.age', 'patient.sex'], className: 'review-group-patient' },
+  { title: 'Subjective', note: 'Reported history and symptoms', paths: ['chief_complaint', 'hpi', 'past_history', 'medications', 'allergies'], className: 'review-group-subjective' },
+  { title: 'Objective', note: 'Measured and observed findings', paths: ['vitals.bp', 'vitals.hr', 'vitals.rr', 'vitals.temp_c', 'vitals.spo2', 'physical_exam'], className: 'review-group-objective' },
+  { title: 'Assessment', note: 'Only what was explicitly stated', paths: ['assessment'], className: 'review-group-assessment' },
+  { title: 'Plan', note: 'Only what was explicitly stated', paths: ['plan'], className: 'review-group-plan' },
+]
 export default function ReviewForm({ record, onChange, pending, onConfirm, warnings }: {
   record: RecordDraft; onChange: (record: RecordDraft, path: string) => void; pending: Set<string>
   onConfirm: (path: string) => void; warnings: Warning[]
 }) {
-  return <div className="space-y-5">{fields.map(([path, label, kind]) => {
+  function renderField([path, label, kind]: (typeof fields)[number]) {
     const highlighted = pending.has(path)
     return <div key={path} className={highlighted ? 'review-field ai-field' : 'review-field'}>
       <div className="flex items-center justify-between gap-2 mb-2"><label htmlFor={path} className="field-label">{label}</label>
@@ -35,5 +42,9 @@ export default function ReviewForm({ record, onChange, pending, onConfirm, warni
         : <input id={path} type={kind === 'number' ? 'number' : 'text'} step="any" value={valueAt(record, path)} placeholder="Not stated" onChange={e => onChange(updateAt(record, path, e.target.value, kind), path)} />}
       {warnings.filter(w => w.field === path).map((w, i) => <p key={i} className="mt-2 text-xs text-amber-800">{w.message}</p>)}
     </div>
-  })}</div>
+  }
+  return <div className="review-groups">{groups.map(group => <section key={group.title} className={`review-group ${group.className}`} aria-label={group.title}>
+    <div className="review-group-heading"><h3>{group.title}</h3><p>{group.note}</p></div>
+    <div className="review-group-fields">{fields.filter(([path]) => group.paths.includes(path)).map(renderField)}</div>
+  </section>)}</div>
 }
