@@ -30,5 +30,5 @@ export async function downloadPdf(id: string) {
     throw new Error(typeof data.detail === 'string' ? data.detail : 'PDF export failed. Unlock the vault and retry.')
   }
   const url = URL.createObjectURL(await response.blob()); const a = document.createElement('a')
-  a.href = url; a.download = `wardnote-${id.slice(0, 8)}.pdf`; a.click(); URL.revokeObjectURL(url)
+  a.href = url; a.download = `tiboq-${id.slice(0, 8)}.pdf`; a.click(); URL.revokeObjectURL(url)
 }
