@@ -170,20 +170,6 @@ Real local Qwen structuring and nomic-backed cited Q&A passed the opt-in integra
 
 Initial model downloads were denied by the cloud egress policy. After adding the required setup-only domains, all weights were obtained successfully. Environment settings retain these preparation domains, `WHISPER_MODEL_PATH`, and complete install/startup instructions. Saving configuration does not prove publication; the app itself never uses those remote domains. Generic Taglish accuracy still needs testing with representative fictional recordings; language auto-detection is enabled.
 
-## Two-minute demo
-
-Do setup and model downloads in advance. Use a fresh vault and fictional data only.
-
-- **0:00–0:15:** Unlock. Expand **Offline proof**: loopback binding, model names, no external application HTTP routes, local document/chunk count.
-- **0:15–0:35:** Toggle **Demo mode**. It loads a prewritten fictional presentation and indexes the three SAMPLE ONLY checklists plus notes. This explicitly labeled preset is not live AI output. If needed, use **Load sample library** in My library to retry indexing.
-- **0:35–0:55:** Click **Structure from text** for real local generation. Optionally dictate one sentence; typed/demo input works if the microphone fails.
-- **0:55–1:15:** Edit HR to `400` to show the deterministic warning, then restore it to `88`. Review each amber field. Show the identifier warning by typing `Patient name: Jane Doe` in HPI, then remove the flagged name. Nothing has been saved yet.
-- **1:15–1:35:** Run **Check completeness**, open a citation, and show its highlighted exact source. Confirm and save; export the one-page draft PDF.
-- **1:35–1:50:** Ask “What does SOAP stand for?” Open the citation. Ask an unrelated question, e.g. “What is the insulin regimen?” to show **Not covered by your library**.
-- **1:50–2:00:** Turn on **airplane mode** (disconnect Wi-Fi/Ethernet too if your OS leaves either enabled). Re-run the SOAP question and inspect Offline proof. The local UI, vault and already loaded models still work. Lock the vault to finish.
-
-Do not use Chromium's network-emulation “offline” mode as a substitute: it blocks loopback requests too, unlike disabling external adapters. The offline proof panel reports the app's enforced routes and counters; it is not an OS packet capture and cannot audit unrelated processes. Configure Ollama locally, disable its debug logs/history, and preload all weights before demonstrating isolation.
-
 ## Security and safety design
 
 - Runtime Python sockets allow loopback only via an audit guard; native audio decoding permits only in-memory formats and pipe/data protocols (no HTTP/TCP or referenced local files); HTTP clients disable proxy inheritance and redirects. The app uses only local Ollama endpoints and never calls pull/download APIs.
