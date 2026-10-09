@@ -73,11 +73,8 @@ def test_valid_not_covered_is_accepted(monkeypatch):
     }
 
 
-@pytest.mark.parametrize('bad_citation', [
-    {'chunk_id': 'known-chunk', 'quote': 'This quote does not occur in the source.'},
-    {'chunk_id': 'unknown-chunk', 'quote': 'charged particles interact with the upper atmosphere'},
-])
-def test_invalid_citations_retry_then_raise_model_error(tmp_path, monkeypatch, bad_citation):
+@pytest.mark.parametrize('bad_source_id', ['known-chunk', 'S99'])
+def test_invalid_source_ids_retry_then_raise_model_error(tmp_path, monkeypatch, bad_source_id):
     vault = Vault(tmp_path)
     token = vault.unlock('strong password')
     vault.index = [make_chunk()]
@@ -88,14 +85,40 @@ def test_invalid_citations_retry_then_raise_model_error(tmp_path, monkeypatch, b
     async def fake_post(path, body, timeout_seconds=180):
         return ollama_result({
             'status': 'answered', 'answer': 'An unsupported answer.',
-            'citations': [bad_citation],
+            'source_ids': [bad_source_id],
         })
 
     monkeypatch.setattr(llm, 'embed_query', embedding)
     monkeypatch.setattr(llm, 'local_post', fake_post)
     with pytest.raises(llm.ModelGenerationError) as failure:
         asyncio.run(answer(vault, 'Why do polar lights occur?', ['textbook'], token))
-    assert failure.value.reason == 'citation_validation'
+    assert failure.value.reason == 'answer_validation'
+    vault.close()
+
+
+def test_backend_selects_source_and_verified_exact_quote_when_model_omits_id(tmp_path, monkeypatch):
+    vault = Vault(tmp_path)
+    token = vault.unlock('strong password')
+    vault.index = [make_chunk()]
+
+    async def embedding(question):
+        return [1.0, 0.0]
+
+    async def fake_post(path, body, timeout_seconds=180):
+        supplied = json.loads(body['messages'][1]['content'])['chunks']
+        assert supplied[0]['source_id'] == 'S1'
+        assert 'chunk_id' not in supplied[0]
+        return ollama_result({
+            'status': 'answered',
+            'answer': 'Auroras occur when charged particles interact with the upper atmosphere.',
+        })
+
+    monkeypatch.setattr(llm, 'embed_query', embedding)
+    monkeypatch.setattr(llm, 'local_post', fake_post)
+    result = asyncio.run(answer(vault, 'Why do auroras occur?', ['textbook'], token))
+    assert result['status'] == 'answered'
+    assert result['citations'][0]['chunk_id'] == 'known-chunk'
+    assert result['citations'][0]['snippet'] in result['citations'][0]['context']
     vault.close()
 
 

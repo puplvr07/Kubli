@@ -73,6 +73,21 @@ class RAGResponse(StrictModel):
             raise ValueError('not_covered responses cannot include citations')
         return self
 
+
+class RAGModelResponse(StrictModel):
+    """Small model output; the backend attaches exact citation excerpts."""
+    status: Literal['answered', 'not_covered']
+    answer: str = Field(min_length=1, max_length=4000)
+    source_ids: list[str] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode='after')
+    def validate_status_payload(self) -> Self:
+        if not self.answer.strip():
+            raise ValueError('answer cannot be blank')
+        if self.status == 'not_covered' and self.source_ids:
+            raise ValueError('not_covered responses cannot include sources')
+        return self
+
 class CompletenessInput(StrictModel):
     record: Record
 

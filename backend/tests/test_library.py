@@ -5,7 +5,7 @@ from app.services.parsing import PageText, chunk_pages, parse_file
 from app.services.rag import rank, answer, missing_items, NOT_COVERED
 from app.services import llm
 from app.services.store import Vault
-from app.schemas import empty_record, RAGCitation, RAGResponse
+from app.schemas import empty_record, RAGModelResponse
 from app.routers.library import bounded_filename
 from fastapi.testclient import TestClient
 from app.main import app
@@ -59,9 +59,9 @@ def test_grounded_answer_and_valid_not_covered(tmp_path, monkeypatch):
     vault = Vault(tmp_path); token = vault.unlock('strong password')
     vault.index = [make_chunk('Fever: document temperature in the stated unit.')]
     async def embedding(question): return [1., 0.]
-    responses = [RAGResponse(status='answered', answer='Record the temperature in the stated unit.',
-                             citations=[RAGCitation(chunk_id='chunk1', quote='fever:   DOCUMENT temperature in the stated unit.')]),
-                 RAGResponse(status='not_covered', answer=NOT_COVERED, citations=[])]
+    responses = [RAGModelResponse(status='answered', answer='Record the temperature in the stated unit.',
+                                  source_ids=['S1']),
+                 RAGModelResponse(status='not_covered', answer=NOT_COVERED, source_ids=[])]
     async def generated(prompt, schema_model, validator_extra=None, max_attempts=2, *, data):
         value = responses.pop(0)
         value = validator_extra(value) if validator_extra else value
