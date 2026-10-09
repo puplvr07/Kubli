@@ -119,6 +119,9 @@ async def generate_validated(prompt: str, schema_model: type[T],
     metadata: dict[str, Any] = {}
     deadline = time.monotonic() + RAG_TIMEOUT_SECONDS
     for attempt in range(max_attempts):
+        # A transport failure must not be reported with output from an earlier attempt.
+        raw_output = ''
+        metadata = {}
         retry_instruction = '' if attempt == 0 else (
             f' Previous response failed validation ({failure_reason}). '
             'Return one complete JSON object that exactly matches the schema.'

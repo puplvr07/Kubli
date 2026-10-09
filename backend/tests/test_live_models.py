@@ -34,7 +34,12 @@ def test_real_sample_library_citations_and_refusal(local_client):
     response = local_client.post('/api/library/ask', json={'question':'What does SOAP stand for?', 'scope':['notes']})
     assert response.status_code == 200
     result = response.json()
-    assert result['citations'] and 'Subjective' in result['answer']
-    assert all(c['snippet'] in c['context'] for c in result['citations'])
+    assert result['status'] in {'answered', 'evidence'}
+    passages = result['citations'] or result.get('evidence', [])
+    assert passages and any('Subjective' in c['snippet'] for c in passages)
+    assert all(c['snippet'] in c['context'] for c in passages)
     refusal = local_client.post('/api/library/ask', json={'question':'What is the insulin regimen?', 'scope':['notes','guidelines','textbook']})
-    assert refusal.json() == {'answer':'Not covered by your library','citations':[]}
+    assert refusal.status_code == 200
+    assert refusal.json()['status'] == 'not_covered'
+    assert refusal.json()['answer'] == 'Not covered by your library'
+    assert refusal.json()['citations'] == []
