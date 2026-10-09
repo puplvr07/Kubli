@@ -5,7 +5,7 @@ import pytest
 
 from app.schemas import RAGResponse
 from app.services import llm
-from app.services.rag import NOT_COVERED, answer
+from app.services.rag import NOT_COVERED, answer, source_evidence
 from app.services.store import Vault
 
 
@@ -84,7 +84,7 @@ def test_invalid_source_ids_retry_then_raise_model_error(tmp_path, monkeypatch, 
 
     async def fake_post(path, body, timeout_seconds=180):
         return ollama_result({
-            'status': 'answered', 'answer': 'An unsupported answer.',
+            'status': 'answered', 'answer': make_chunk()['text'],
             'source_ids': [bad_source_id],
         })
 
@@ -96,7 +96,7 @@ def test_invalid_source_ids_retry_then_raise_model_error(tmp_path, monkeypatch, 
     vault.close()
 
 
-def test_backend_selects_source_and_verified_exact_quote_when_model_omits_id(tmp_path, monkeypatch):
+def test_backend_selects_source_and_exact_quote_when_model_omits_id(tmp_path, monkeypatch):
     vault = Vault(tmp_path)
     token = vault.unlock('strong password')
     vault.index = [make_chunk()]
@@ -110,19 +110,78 @@ def test_backend_selects_source_and_verified_exact_quote_when_model_omits_id(tmp
         assert 'chunk_id' not in supplied[0]
         return ollama_result({
             'status': 'answered',
-            'answer': 'Auroras occur when charged particles interact with the upper atmosphere.',
+            'answer': make_chunk()['text'],
         })
 
     monkeypatch.setattr(llm, 'embed_query', embedding)
     monkeypatch.setattr(llm, 'local_post', fake_post)
     result = asyncio.run(answer(vault, 'Why do auroras occur?', ['textbook'], token))
     assert result['status'] == 'answered'
+    assert result['answer'] == make_chunk()['text']
     assert result['citations'][0]['chunk_id'] == 'known-chunk'
-    assert result['citations'][0]['snippet'] in result['citations'][0]['context']
+    assert result['citations'][0]['snippet'] == result['answer']
+    assert result['citations'][0]['filename'] == 'science.txt'
+    assert result['citations'][0]['page'] == 1
     vault.close()
 
 
-def test_model_error_has_distinct_http_response(tmp_path, monkeypatch):
+@pytest.mark.parametrize('answer_text, source_id', [
+    ('The aurora appears when charged particles interact with the upper atmosphere. It is green.', 'S1'),
+    ('Charged particles make every aurora green.', 'S1'),
+    ('The aurora appears when charged particles interact with the upper atmosphere.', 'S2'),
+])
+def test_partial_claims_and_unrelated_citations_fail_closed(tmp_path, monkeypatch, answer_text, source_id):
+    vault = Vault(tmp_path)
+    token = vault.unlock('strong password')
+    vault.index = [make_chunk(), dict(make_chunk(), id='other-chunk',
+                                      text='Yeast makes bread rise.', filename='bread.txt')]
+
+    async def embedding(question):
+        return [1.0, 0.0]
+
+    async def fake_post(path, body, timeout_seconds=180):
+        return ollama_result({'status': 'answered', 'answer': answer_text,
+                              'source_ids': [source_id]})
+
+    monkeypatch.setattr(llm, 'embed_query', embedding)
+    monkeypatch.setattr(llm, 'local_post', fake_post)
+    with pytest.raises(llm.ModelGenerationError) as failure:
+        asyncio.run(answer(vault, 'Why do auroras occur?', ['textbook'], token))
+    assert failure.value.reason == 'answer_validation'
+    vault.close()
+
+
+def test_genuine_missing_coverage_keeps_refusal(tmp_path, monkeypatch):
+    vault = Vault(tmp_path)
+    token = vault.unlock('strong password')
+    vault.index = [make_chunk()]
+
+    async def embedding(question):
+        return [1.0, 0.0]
+
+    async def fake_post(path, body, timeout_seconds=180):
+        return ollama_result({'status': 'not_covered', 'answer': NOT_COVERED,
+                              'source_ids': []})
+
+    monkeypatch.setattr(llm, 'embed_query', embedding)
+    monkeypatch.setattr(llm, 'local_post', fake_post)
+    result = asyncio.run(answer(vault, 'What insulin dose is stated?', ['textbook'], token))
+    assert result['status'] == 'not_covered'
+    assert result['answer'] == NOT_COVERED
+    assert result['citations'] == []
+    vault.close()
+
+
+@pytest.mark.parametrize('reason, message', [
+    ('invalid_json', 'invalid JSON'),
+    ('schema_validation', 'incomplete response'),
+    ('truncated', 'cut off'),
+    ('unreachable', 'not running'),
+    ('timeout', 'timed out'),
+    ('request_failed', 'rejected the request'),
+    ('invalid_service_response', 'service returned an invalid response'),
+])
+def test_model_error_has_distinct_http_response(tmp_path, monkeypatch, reason, message):
     from fastapi.testclient import TestClient
     from app.main import app
 
@@ -135,7 +194,7 @@ def test_model_error_has_distinct_http_response(tmp_path, monkeypatch):
             return [1.0, 0.0]
 
         async def failed(*args, **kwargs):
-            raise llm.ModelGenerationError('invalid_json')
+            raise llm.ModelGenerationError(reason)
 
         monkeypatch.setattr(llm, 'embed_query', embedding)
         monkeypatch.setattr(llm, 'generate_validated', failed)
@@ -144,3 +203,83 @@ def test_model_error_has_distinct_http_response(tmp_path, monkeypatch):
     assert response.status_code == 502
     assert response.json()['status'] == 'model_error'
     assert response.json()['detail'] != NOT_COVERED
+    assert message in response.json()['detail']
+
+
+@pytest.mark.parametrize('reason', ['unreachable', 'timeout', 'request_failed'])
+def test_transport_failure_does_not_reuse_previous_invalid_output(monkeypatch, reason):
+    calls = 0
+
+    async def fake_post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ollama_result({})
+        raise llm.LocalModelError(reason, 'Fictional service failure')
+
+    monkeypatch.setattr(llm, 'local_post', fake_post)
+    with pytest.raises(llm.ModelGenerationError) as failure:
+        asyncio.run(llm.generate_validated('prompt', RAGResponse, data={}))
+    assert calls == 2
+    assert failure.value.reason == reason
+    assert failure.value.raw_output == ''
+    assert failure.value.metadata == {}
+
+
+def test_evidence_requires_similarity_and_specific_terms_and_is_bounded():
+    chunks = [dict(make_chunk(), id=str(i), text='SOAP means study notes. ' + str(i) + 'x' * 1700,
+                   similarity=0.8) for i in range(5)]
+    assert source_evidence(chunks, 'What metformin dosage is stated in the library?') == []
+    assert source_evidence([dict(chunks[0], similarity=0.1)], 'SOAP') == []
+    result = source_evidence(chunks, 'What does SOAP stand for?')
+    assert len(result) == 3
+    assert all(len(c['snippet']) <= 1600 and c['snippet'] in c['context'] for c in result)
+    assert all(c['filename'] == 'science.txt' and c['page'] == 1 for c in result)
+
+
+@pytest.mark.parametrize('failure', ['refusal', 'invalid_json', 'truncated', 'timeout', 'unreachable', 'answer_validation'])
+def test_evidence_survives_answer_failure_without_becoming_an_answer(tmp_path, monkeypatch, failure):
+    vault = Vault(tmp_path)
+    token = vault.unlock('fictional smoke password')
+    vault.index = [make_chunk()]
+
+    async def embedding(question):
+        return [1.0, 0.0]
+
+    async def fake_post(*args, **kwargs):
+        if failure == 'refusal':
+            return ollama_result({'status': 'not_covered', 'answer': NOT_COVERED, 'source_ids': []})
+        raise llm.ModelGenerationError(failure)
+
+    monkeypatch.setattr(llm, 'embed_query', embedding)
+    monkeypatch.setattr(llm, 'local_post', fake_post)
+    result = asyncio.run(answer(vault, 'What makes the aurora?', ['textbook'], token))
+    assert result['status'] == 'evidence'
+    assert result['answer'] == '' and result['citations'] == []
+    assert result['evidence'][0]['snippet'] == make_chunk()['text']
+    if failure == 'refusal':
+        assert result['model_error'] is None
+    else:
+        assert result['model_error']['reason'] == failure
+    vault.close()
+
+
+def test_fallback_rechecks_authentication_after_model_failure(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    vault = Vault(tmp_path)
+    token = vault.unlock('fictional smoke password')
+    vault.index = [make_chunk()]
+
+    async def embedding(question):
+        return [1.0, 0.0]
+
+    async def failed(*args, **kwargs):
+        vault.lock()
+        raise llm.ModelGenerationError('timeout')
+
+    monkeypatch.setattr(llm, 'embed_query', embedding)
+    monkeypatch.setattr(llm, 'generate_validated', failed)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(answer(vault, 'What makes the aurora?', ['textbook'], token))
+    assert error.value.status_code == 401
+    vault.close()

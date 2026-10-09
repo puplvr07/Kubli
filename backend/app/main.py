@@ -91,13 +91,15 @@ async def validation_error(request: Request, exc: RequestValidationError):
 async def model_generation_error(request: Request, exc: llm.ModelGenerationError):
     messages = {
         'unreachable': 'Ollama is not running. Start the local Ollama service and retry.',
+        'request_failed': 'The local Ollama service rejected the request. Check that it is running and has enough memory, then retry.',
+        'invalid_service_response': 'The local Ollama service returned an invalid response. Check the service and retry.',
         'model_missing': f'The configured local model is not installed. Run: ollama pull {llm.MODEL}',
         'timeout': 'The local model timed out. Check available RAM or select a smaller OLLAMA_MODEL, then retry.',
         'truncated': 'The local model response was cut off. Please retry.',
         'invalid_json': 'The local model returned invalid JSON. Please retry.',
         'schema_validation': 'The local model returned an incomplete response. Please retry.',
         'citation_validation': 'The local model returned citations that could not be verified. Please retry.',
-        'answer_validation': 'The local model returned an answer outside the requested format. Please retry.',
+        'answer_validation': 'The local model answer could not be matched to an exact passage in the selected source. Retry or rephrase your question.',
     }
     return JSONResponse(status_code=502, content={
         'status': 'model_error',
