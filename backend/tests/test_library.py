@@ -5,12 +5,20 @@ from app.services.rag import rank, answer, missing_items, NOT_COVERED
 from app.services import llm
 from app.services.store import Vault
 from app.schemas import empty_record, RAGCitation, RAGResponse
+from app.routers.library import bounded_filename
 from fastapi.testclient import TestClient
 from app.main import app
 
 
 def make_chunk(text='Document: allergies as reported.', **overrides):
     return dict(id='chunk1', document_id='doc1', text=text, filename='fever.txt', page=3, heading='Fever', tag='guidelines', embedding=[1., 0.], embedding_model=llm.EMBEDDING_PROFILE, **overrides)
+
+
+def test_long_upload_filename_keeps_supported_extension():
+    filename = '[CPG] ' + ('Clinical Practice Guidelines ' * 10) + '.pdf'
+    bounded = bounded_filename(filename)
+    assert len(bounded) == 160
+    assert bounded.endswith('.pdf')
 
 
 def test_chunk_pages_exact_slices_and_page_numbers():

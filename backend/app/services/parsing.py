@@ -27,8 +27,8 @@ def parse_file(filename: str, content: bytes, ocr: bool = False) -> list[PageTex
             with pymupdf.open(stream=content, filetype='pdf') as document:
                 if document.is_encrypted:
                     raise HTTPException(422, 'Password-protected PDF cannot be parsed. Export an unlocked copy locally.')
-                if len(document) > 300:
-                    raise HTTPException(422, 'Prototype limit: 300 pages per PDF. Split the document locally.')
+                if len(document) > 500:
+                    raise HTTPException(422, 'Limit: 500 pages per PDF. Split the document locally.')
                 for number, page in enumerate(document, 1):
                     text = page.get_text()
                     if not text.strip() and ocr:

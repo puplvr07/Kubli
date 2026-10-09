@@ -128,7 +128,7 @@ CPU int8 is enforced for STT. Ollama's host is fixed in application code to loop
 
 Choose up to ten PDF/DOCX/TXT/MD/image files, set **My notes / Guideline / Textbook**, and optionally enable best-effort local OCR. Review extracted identifier warnings before **Proceed and index**. You may cancel or exclude individual files; unconfirmed uploads are not saved. If a batch partly succeeds, completed files remain in the library; exclude those before retrying failed files.
 
-Uploads are bounded to 20 MB/file, 30 MB combined, 32 MB including request framing; multipart content stays in memory. OCR uses Tesseract through stdin/stdout, avoiding plaintext image temporary files. Originals are not retained. Parsed text, filenames, tags, timestamps, and vectors are encrypted in SQLite. The index is reconstructed in memory at unlock, then cleared at lock.
+Uploads are bounded to 20 MB/file, 30 MB combined, 32 MB including request framing, 500 pages per PDF, 2,000 chunks per document, and 2,000,000 extracted characters; multipart content stays in memory. OCR uses Tesseract through stdin/stdout, avoiding plaintext image temporary files. Originals are not retained. Parsed text, filenames, tags, timestamps, and vectors are encrypted in SQLite. The index is reconstructed in memory at unlock, then cleared at lock.
 
 PDF citations use real page numbers, including pages skipped for having no text. DOCX uses heading-based **sections**, since reliable page layout is unavailable without a document renderer. TXT/MD form-feed characters delimit pages; otherwise the location is page 1. Chunks are approximately 400 tokens using a character estimate with 50-token overlap, never crossing source pages/sections.
 

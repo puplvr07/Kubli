@@ -14,6 +14,17 @@ router = APIRouter(prefix='/api')
 TAGS = {'notes', 'guidelines', 'textbook'}
 
 
+def bounded_filename(raw_name: str) -> str:
+    """Keep the real extension when limiting a user-supplied basename."""
+    name = Path(raw_name.replace('\\', '/')).name
+    if len(name) <= 160:
+        return name
+    suffix = Path(name).suffix
+    if not suffix or len(suffix) >= 160:
+        return name[:160]
+    return name[:160 - len(suffix)] + suffix
+
+
 def document_summary(document: dict) -> dict:
     return {key: document[key] for key in ('id', 'title', 'tag', 'timestamp', 'chunks', 'sample')}
 
@@ -52,7 +63,7 @@ async def upload(vault=Depends(unlocked), files: list[UploadFile] = File(...), t
     reviews = []
     total = 0
     for file in files:
-        filename = Path((file.filename or 'document').replace('\\', '/')).name[:160]
+        filename = bounded_filename(file.filename or 'document')
         content = await file.read(20 * 1024 * 1024 + 1)
         total += len(content)
         if len(content) > 20 * 1024 * 1024 or total > 30 * 1024 * 1024:
