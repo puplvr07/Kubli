@@ -1,12 +1,19 @@
+import json
 import os
 import time
 import pytest
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
 from fastapi import HTTPException
-from app.services.crypto import encrypt, decrypt, password_key
+from app.services.crypto import LEGACY_MAGIC, MAGIC, decrypt, derive, encrypt, password_key
 from app.services.deid import scan, scan_record
-from app.services.store import Vault
+from app.services.store import TEST_BLOB, Vault
 from app.schemas import empty_record
+
+
+def legacy_encrypt(key: bytes, plaintext: bytes, aad: bytes) -> bytes:
+    salt, iv = os.urandom(16), os.urandom(12)
+    return LEGACY_MAGIC + salt + iv + AESGCM(derive(key, salt)).encrypt(iv, plaintext, aad)
 
 
 def test_identifier_patterns():
@@ -25,8 +32,10 @@ def test_roundtrip_wrong_password_and_authenticated_metadata():
     wrong = password_key('another password', salt)
     for data, aad in [(b'patient draft', b'record:1'), (b'{"text":"private chunk","embedding":[0.1,0.9]}', b'chunk:1')]:
         encrypted = encrypt(key, data, aad)
+        assert encrypted.startswith(MAGIC)
         assert data not in encrypted
         assert decrypt(key, encrypted, aad) == data
+        assert decrypt(key, legacy_encrypt(key, data, aad), aad) == data
         assert encrypted != encrypt(key, data, aad)
         with pytest.raises(InvalidTag): decrypt(wrong, encrypted, aad)
         with pytest.raises(InvalidTag): decrypt(key, encrypted, b'changed')
@@ -36,7 +45,17 @@ def test_vault_locked_wrong_password_and_index_rebuild(tmp_path):
     vault = Vault(tmp_path)
     token = vault.unlock('my strong password')
     vault.authorize(token)
-    vault.put_many([('record', {'id': 'r1', 'timestamp': 'secret date', 'chief_complaint': 'private symptom'}), ('chunk', {'id': 'c1', 'text': 'private text', 'embedding': [0.1, 0.2]})])
+    record = {'id': 'r1', 'timestamp': 'secret date', 'chief_complaint': 'private symptom'}
+    chunk = {'id': 'c1', 'text': 'private text', 'embedding': [0.1, 0.2]}
+    vault.put_many([('record', record), ('chunk', chunk)])
+    key = vault.key()
+    with vault.db:
+        vault.db.execute("UPDATE settings SET value=? WHERE name='verifier'",
+                         (legacy_encrypt(key, TEST_BLOB, b'verifier'),))
+        vault.db.execute('UPDATE payloads SET data=? WHERE id=?',
+                         (legacy_encrypt(key, json.dumps(record).encode(), b'record:r1'), 'r1'))
+        vault.db.execute('UPDATE payloads SET data=? WHERE id=?',
+                         (legacy_encrypt(key, json.dumps(chunk).encode(), b'chunk:c1'), 'c1'))
     vault.lock()
     assert not vault.index and vault._key is None
     with pytest.raises(HTTPException): vault.authorize(token)
@@ -45,6 +64,9 @@ def test_vault_locked_wrong_password_and_index_rebuild(tmp_path):
     vault.unlock('my strong password')
     assert vault.get('record', 'r1')['chief_complaint'] == 'private symptom'
     assert vault.index[0]['embedding'] == [0.1, 0.2]
+    assert vault.db.execute("SELECT data FROM payloads WHERE id='c1'").fetchone()[0].startswith(MAGIC)
+    assert vault.db.execute("SELECT data FROM payloads WHERE id='r1'").fetchone()[0].startswith(MAGIC)
+    assert vault.db.execute("SELECT value FROM settings WHERE name='verifier'").fetchone()[0].startswith(MAGIC)
     assert b'private symptom' not in vault.path.read_bytes()
     assert b'private text' not in vault.path.read_bytes()
     vault.last_activity = time.monotonic() - 301

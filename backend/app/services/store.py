@@ -4,10 +4,11 @@ import secrets
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from fastapi import HTTPException
-from app.services.crypto import password_key, encrypt, decrypt
+from app.services.crypto import password_key, encrypt, decrypt, is_legacy
 
 TEST_BLOB = b'WardNote local vault verifier v1'
 
@@ -66,14 +67,19 @@ class Vault:
                         raise InvalidTag()
                 except (InvalidTag, ValueError):
                     raise HTTPException(401, 'Wrong password. The vault remains locked.') from None
+                if is_legacy(verifier):
+                    with self.db:
+                        self.db.execute("UPDATE settings SET value=? WHERE name='verifier'",
+                                        (encrypt(key, TEST_BLOB, b'verifier'),))
             self._key = bytearray(key)
             self.token = secrets.token_urlsafe(32)
             self.last_activity = time.monotonic()
             try:
-                self.index = self.list('chunk')
+                self.index = self._load_bucket('chunk', key, parallel_legacy=True)
             except (InvalidTag, ValueError):
                 self.lock()
                 raise HTTPException(500, 'Encrypted library is damaged or has been altered. Restore a trusted backup.') from None
+            self.last_activity = time.monotonic()
             return self.token
 
     def authorize(self, token: str | None, touch: bool = True):
@@ -104,14 +110,40 @@ class Vault:
             if row is None:
                 raise HTTPException(404, 'Item not found in this local vault.')
             try:
-                return json.loads(decrypt(key, row[0], f'{bucket}:{item_id}'.encode()))
+                item, upgraded = self._decode_payload(key, bucket, item_id, row[0])
+                if upgraded is not None:
+                    with self.db:
+                        self.db.execute('UPDATE payloads SET data=? WHERE id=? AND bucket=?',
+                                        (upgraded, item_id, bucket))
+                return item
             except (InvalidTag, ValueError):
                 raise HTTPException(500, 'Encrypted item is damaged or has been altered.') from None
 
     def list(self, bucket: str) -> list[dict]:
         with self.mutex:
-            ids = self.db.execute('SELECT id FROM payloads WHERE bucket=?', (bucket,)).fetchall()
-            return [self.get(bucket, row[0]) for row in ids]
+            return self._load_bucket(bucket, self.key())
+
+    @staticmethod
+    def _decode_payload(key: bytes, bucket: str, item_id: str, blob: bytes) -> tuple[dict, bytes | None]:
+        aad = f'{bucket}:{item_id}'.encode()
+        plaintext = decrypt(key, blob, aad)
+        item = json.loads(plaintext)
+        return item, encrypt(key, plaintext, aad) if is_legacy(blob) else None
+
+    def _load_bucket(self, bucket: str, key: bytes, parallel_legacy: bool = False) -> list[dict]:
+        rows = self.db.execute('SELECT id, data FROM payloads WHERE bucket=?', (bucket,)).fetchall()
+        decode = lambda row: self._decode_payload(key, bucket, row[0], row[1])
+        if parallel_legacy and len(rows) > 1 and any(is_legacy(row[1]) for row in rows):
+            workers = min(4, os.cpu_count() or 1)
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='vault-upgrade') as pool:
+                decoded = list(pool.map(decode, rows))
+        else:
+            decoded = [decode(row) for row in rows]
+        upgrades = [(upgraded, row[0], bucket) for row, (_, upgraded) in zip(rows, decoded) if upgraded is not None]
+        if upgrades:
+            with self.db:
+                self.db.executemany('UPDATE payloads SET data=? WHERE id=? AND bucket=?', upgrades)
+        return [item for item, _ in decoded]
 
     def delete(self, bucket: str, item_id: str):
         with self.mutex:
