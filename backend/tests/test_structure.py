@@ -134,6 +134,111 @@ def test_explicit_numbers_recovered_and_ambiguous_or_family_values_empty():
     assert grounded(record, 'BP 16/10 kPa.').record.vitals.bp is None
 
 
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('28-year-old female reports chest pain.', 'female'),
+    ('Patient is male. BP 118/76.', 'male'),
+    ('Reports chest pain. HR 88.', None),
+    ('28-year-old female. Patient is male.', None),
+    ('Family history: mother is a 50-year-old female.', None),
+    ('Patient sex: possibly female.', None),
+    ('Possibly a 28-year-old female.', None),
+    ('Sex: female or male.', None),
+    ('Sex: female?', None),
+])
+def test_patient_sex_requires_unambiguous_explicit_evidence(text, expected):
+    record = empty_record()
+    record.patient.sex = 'male'
+    assert grounded(record, text).record.patient.sex == expected
+
+
+def test_exact_fictional_encounter_recovers_explicit_female():
+    text = ('28-year-old female reports chest pain for two hours, worse with movement. '
+            'Past history: not stated. Medications: not stated. Allergies: not stated. '
+            'BP 118/76, HR 88, RR 18, temperature 36.8 C, SpO2 98%. '
+            'Physical exam: alert, speaking in full sentences. '
+            'Assessment: chest pain, cause not stated. '
+            'Plan: present findings to the supervising clinician.')
+    result = grounded(empty_record(), text)
+    assert result.record.patient.sex == 'female'
+    assert result.record.patient.age == 28
+    assert result.record.vitals.bp == '118/76'
+
+
+HEADACHE = ('A 24-year-old male reports a headache since yesterday, described as a dull pain across the forehead. '
+            'Pain is rated 4 out of 10. Past history: not stated. Medications: not stated. '
+            'Allergies: not stated. Blood pressure 120/80 mmHg, heart rate 76 bpm, '
+            'respiratory rate 16/min, temperature 36.7 C, and SpO2 99%. '
+            'Physical examination: awake, alert, and speaking clearly. '
+            'Assessment: headache, cause not stated. '
+            'Plan: present findings to the supervising clinician.')
+
+
+def test_exact_headache_recovers_bounded_clinical_spans():
+    record = empty_record()
+    record.chief_complaint = 'headache'
+    record.hpi = ('A 24-year-old male reports a headache since yesterday, described as a dull pain '
+                  'across the forehead. Pain is rated 4 out of 10.')
+    record.assessment = 'headache, cause not stated'
+    record.plan = 'present findings to the supervising clinician'
+    result = grounded(record, HEADACHE).record
+    assert result.patient.age == 24 and result.patient.sex == 'male'
+    assert result.chief_complaint == 'headache'
+    assert 'since yesterday' in result.hpi
+    assert 'dull pain across the forehead' in result.hpi
+    assert '4 out of 10' in result.hpi
+    assert 'Past history' not in result.hpi
+    assert result.physical_exam == 'awake, alert, and speaking clearly'
+    assert result.assessment == 'headache, cause not stated'
+    assert result.plan == 'present findings to the supervising clinician'
+    assert result.past_history is None and result.medications == [] and result.allergies == []
+    assert result.vitals.bp == '120/80' and result.vitals.hr == 76
+
+
+def test_previous_chest_pain_encounter_keeps_sections_separate():
+    text = ('28-year-old female reports chest pain for two hours, worse with movement. '
+            'Past history: not stated. Medications: not stated. Allergies: not stated. '
+            'BP 118/76, HR 88, RR 18, temperature 36.8 C, SpO2 98%. '
+            'Physical exam: alert, speaking in full sentences. '
+            'Assessment: chest pain, cause not stated. '
+            'Plan: present findings to the supervising clinician.')
+    result = grounded(empty_record(), text).record
+    assert result.patient.sex == 'female'
+    assert 'chest pain for two hours, worse with movement' in result.hpi
+    assert 'Past history' not in result.hpi and 'Medications' not in result.hpi
+    assert result.physical_exam == 'alert, speaking in full sentences'
+    assert result.assessment == 'chest pain, cause not stated'
+    assert result.past_history is None and result.medications == [] and result.allergies == []
+
+
+def test_hpi_model_output_with_appended_sections_uses_bounded_narrative():
+    text = ('Patient reports a headache since yesterday. Pain is rated 4 out of 10. '
+            'Past history: not stated. Medications: not stated. Allergies: not stated.')
+    record = empty_record()
+    record.hpi = text
+    result = grounded(record, text).record
+    assert result.hpi == 'Patient reports a headache since yesterday. Pain is rated 4 out of 10'
+    assert 'Past history' not in result.hpi
+    assert result.past_history is None and result.medications == [] and result.allergies == []
+
+
+def test_reordered_multiline_sections_and_missing_or_conflicting_spans():
+    record = empty_record()
+    text = ('Assessment: tension headache, cause not stated\n'
+            'Physical exam: alert and oriented\n'
+            'Plan: discuss with supervisor\n'
+            'HPI: headache since Monday\nPast history: not stated')
+    result = grounded(record, text).record
+    assert result.hpi == 'headache since Monday'
+    assert result.physical_exam == 'alert and oriented'
+    assert result.assessment == 'tension headache, cause not stated'
+    assert result.plan is None  # The fallback leaves other model-omitted fields alone.
+    assert result.past_history is None
+    assert grounded(record, 'HPI: not stated. Physical exam: not stated. Assessment: not stated.').record.hpi is None
+    conflicting = grounded(record, 'HPI: headache since Monday. HPI: headache since Tuesday.')
+    assert conflicting.record.hpi is None
+    assert grounded(record, 'HPI: denies headache. Assessment: possible migraine.').record.hpi is None
+
+
 def test_subword_excerpts_cannot_reverse_exam_findings():
     record = empty_record(); record.physical_exam = 'tender'; record.hpi = 'febrile'
     result = grounded(record, 'Physical exam: nontender. The patient is afebrile.')

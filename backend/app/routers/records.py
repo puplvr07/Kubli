@@ -47,4 +47,4 @@ def delete_record(item_id: str, vault=Depends(unlocked)):
 @router.get('/records/{item_id}/pdf')
 def pdf(item_id: str, vault=Depends(unlocked)):
     content = render_pdf(vault.get('record', item_id))
-    return Response(content, media_type='application/pdf', headers={'Content-Disposition': 'attachment; filename="wardnote-draft.pdf"', 'Cache-Control': 'no-store'})
+    return Response(content, media_type='application/pdf', headers={'Content-Disposition': 'attachment; filename="tiboq-draft.pdf"', 'Cache-Control': 'no-store'})
