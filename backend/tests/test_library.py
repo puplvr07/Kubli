@@ -2,7 +2,7 @@ import asyncio
 import json
 import pytest
 from app.services.parsing import PageText, chunk_pages, parse_file
-from app.services.rag import rank, answer, missing_items, NOT_COVERED
+from app.services.rag import rank, answer, lookup_term, missing_items, NOT_COVERED
 from app.services import llm
 from app.services.store import Vault
 from app.schemas import empty_record, RAGModelResponse
@@ -73,6 +73,30 @@ def test_grounded_answer_and_valid_not_covered(tmp_path, monkeypatch):
     assert result['status'] == 'answered'
     uncovered = asyncio.run(answer(vault, 'galaxy orbital mechanics', ['guidelines'], token))
     assert uncovered['status'] == 'not_covered' and uncovered['answer'] == NOT_COVERED
+    vault.close()
+
+
+def test_term_lookup_returns_exact_definition_without_generation(tmp_path):
+    vault = Vault(tmp_path); token = vault.unlock('strong password')
+    source = ('Cardiovascular Conditions\nANSWERS\nby heart\nWhat Is a Heart Attack?\n'
+              'A heart attack occurs when the blood flow that brings oxygen-rich blood to the heart muscle '
+              'is severely reduced or cut off. This is due to a buildup of plaque in coronary arteries.')
+    vault.index = [dict(make_chunk(source), heading='Heart attack')]
+    result = lookup_term(vault, 'Heart attack', ['guidelines'], token)
+    assert result['status'] == 'answered'
+    assert result['answer'].startswith('A heart attack occurs when')
+    assert result['answer'] in source
+    assert result['citations'][0]['snippet'] == result['answer']
+    vault.close()
+
+
+def test_term_lookup_supports_short_abbreviations_and_scope(tmp_path):
+    vault = Vault(tmp_path); token = vault.unlock('strong password')
+    source = 'MI means myocardial infarction in this glossary. Verify the surrounding context.'
+    vault.index = [dict(make_chunk(source), tag='textbook')]
+    assert lookup_term(vault, 'MI', ['textbook'], token)['status'] == 'answered'
+    assert lookup_term(vault, 'MI', ['notes'], token)['status'] == 'not_covered'
+    assert lookup_term(vault, 'missing term', ['textbook'], token)['answer'] == NOT_COVERED
     vault.close()
 
 

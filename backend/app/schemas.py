@@ -54,6 +54,10 @@ class AskInput(StrictModel):
     question: str = Field(min_length=1, max_length=2000)
     scope: list[Literal['notes', 'guidelines', 'textbook']] = Field(default_factory=lambda: ['notes', 'guidelines', 'textbook'])
 
+class TermLookupInput(StrictModel):
+    term: str = Field(min_length=1, max_length=80)
+    scope: list[Literal['notes', 'guidelines', 'textbook']] = Field(default_factory=lambda: ['notes', 'guidelines', 'textbook'])
+
 class RAGCitation(StrictModel):
     chunk_id: str = Field(min_length=1, max_length=100)
     quote: str = Field(min_length=1, max_length=1800)

@@ -4,11 +4,9 @@ import { post } from '../api'
 import type { Citation } from '../types'
 
 interface LookupResult {
-  status: 'answered' | 'evidence' | 'not_covered' | 'no_match'
+  status: 'answered' | 'not_covered'
   answer: string
   citations: Citation[]
-  evidence?: Citation[]
-  model_error?: { reason: string; message: string } | null
 }
 
 export default function TermLookup({
@@ -39,13 +37,12 @@ export default function TermLookup({
     setResult(null)
     const currentRequest = ++requestId.current
     try {
-      const response = await post<LookupResult>('/api/library/ask', {
-        question: `What does "${term}" mean?`,
+      const response = await post<LookupResult>('/api/library/lookup-term', {
+        term,
         scope: ['notes', 'guidelines', 'textbook'],
       })
       if (currentRequest !== requestId.current) return
       setResult(response)
-      if (response.model_error) setError(response.model_error.message)
     } catch (failure) {
       if (currentRequest !== requestId.current) return
       setError((failure as Error).message)
@@ -54,7 +51,6 @@ export default function TermLookup({
     }
   }
 
-  const evidence = result?.evidence ?? []
   return <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
@@ -80,18 +76,7 @@ export default function TermLookup({
         </button>)}</div>
     </div>}
 
-    {result?.status === 'evidence' && <div className="mt-3 border-t border-slate-200 pt-3">
-      <p className="text-xs font-semibold text-amber-800">No verified definition was found.</p>
-      <p className="text-xs text-slate-500 mt-1">These passages may mention the term. Review their context.</p>
-      {evidence.slice(0, 2).map(item => <div key={item.chunk_id} className="mt-3 rounded-lg bg-white p-3">
-        <blockquote className="whitespace-pre-wrap text-xs leading-relaxed text-slate-600">{item.snippet}</blockquote>
-        <button type="button" className="text-xs text-teal-700 underline mt-2" onClick={() => onCitation(item)}>
-          {item.filename}, {item.location_type === 'section' ? 'section' : 'p.'} {item.page}
-        </button>
-      </div>)}
-    </div>}
-
-    {(result?.status === 'not_covered' || result?.status === 'no_match') &&
+    {result?.status === 'not_covered' &&
       <p className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">Not covered by your library.</p>}
     </div>
   </div>
