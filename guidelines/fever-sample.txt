@@ -1,0 +1,12 @@
+SAMPLE ONLY, not real clinical guidance
+Fever / infection documentation example checklist
+This fictional checklist is a demonstration source, not a validated guideline.
+Document: duration of fever and how temperature was measured.
+Document: temperature in the stated unit, if measured.
+Document: reported associated symptoms and exposures.
+Document: medications already taken, using the exact stated doses.
+Document: allergies as reported.
+Document: relevant past history as reported.
+Document: physical exam findings actually observed.
+Document: assessment as stated, without inferring an infection or diagnosis.
+Document: plan as stated by the supervising clinician.

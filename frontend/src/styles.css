@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@font-face { font-family: WardSans; src: url("/fonts/DejaVuSans.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: WardSans; src: url("/fonts/DejaVuSans-Bold.ttf") format("truetype"); font-weight: 600 900; font-display: swap; }
+:root { font-family: WardSans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #243b39; background: #f5f7f6; font-synthesis: none; }
+body { margin: 0; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+input, textarea, select { width: 100%; border: 1px solid #dbe3df; border-radius: 9px; background: #fff; color: #243b39; padding: 10px 12px; font-size: 14px; outline: none; }
+input:focus, textarea:focus, select:focus { border-color: #338b79; box-shadow: 0 0 0 3px #338b7914; }
+input::placeholder, textarea::placeholder { color: #8d9b96; }
+textarea { resize: vertical; }
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:hover:bg-white;
+}
+@layer components {
+  .btn-primary { @apply btn border-teal-800 bg-teal-800 text-white hover:bg-teal-900 disabled:hover:bg-teal-800; }
+  .btn-soft { @apply btn border-teal-100 bg-teal-50 text-teal-800 hover:bg-teal-100; }
+  .panel { @apply rounded-2xl border border-[#dfe7e2] bg-white; }
+  .field-label { @apply text-xs font-semibold text-slate-600; }
+  .review-field { @apply rounded-xl border border-transparent p-3 transition; }
+  .ai-field { @apply border-amber-200 bg-amber-50/50; }
+  .eyebrow { @apply text-[11px] font-bold uppercase tracking-[.16em] text-slate-500; }
+  .error { @apply rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800; }
+}
+* { box-sizing: border-box; }
+:focus-visible { outline: 2px solid #338b79; outline-offset: 3px; }

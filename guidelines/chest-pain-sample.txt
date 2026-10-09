@@ -1,0 +1,14 @@
+SAMPLE ONLY, not real clinical guidance
+Chest pain documentation example checklist
+This fictional checklist demonstrates citation and documentation features. It must not guide clinical care.
+Document: chief complaint in the patient's own words, including chest pain if reported.
+Document: symptom onset and duration.
+Document: factors that worsen or relieve chest pain.
+Document: associated symptoms that were asked about, with explicit negatives only if stated.
+Document: medication list as reported.
+Document: allergies as reported.
+Document: blood pressure with its units, if measured.
+Document: heart rate with its units, if measured.
+Document: physical exam findings that were actually observed.
+Document: assessment as stated by the supervising clinician; preserve uncertainty.
+Document: plan as stated by the supervising clinician.

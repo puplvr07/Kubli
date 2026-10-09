@@ -1,0 +1,12 @@
+SAMPLE ONLY, not real clinical guidance
+Pediatric dehydration documentation example checklist
+This invented checklist exists only to demonstrate local retrieval. It is not real guidance for assessment or treatment.
+Document: age in the stated unit.
+Document: caregiver's description of fluid intake.
+Document: caregiver's description of urine output.
+Document: timing of vomiting or diarrhea, if reported.
+Document: medication list as reported.
+Document: allergies as reported.
+Document: physical exam observations that were actually made.
+Document: assessment as explicitly stated, including uncertainty about dehydration.
+Document: plan as stated by the supervising clinician.
