@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 from app.services.parsing import PageText, chunk_pages, parse_file
 from app.services.rag import rank, answer, missing_items, NOT_COVERED
@@ -91,19 +92,26 @@ def test_upload_review_encrypted_index_delete_and_reindex(tmp_path, monkeypatch)
     with TestClient(app) as client:
         token = client.post('/api/unlock', json={'password': 'strong password'}).json()['token']
         headers = {'Authorization': 'Bearer ' + token}
-        content = b'Fever notes. Patient name: Maria Santos.\nDocument: allergies as reported.'
+        content = b'Fever notes. Patient name: Maria Santos.\nContact: clinic@example.com.\nDocument: allergies as reported.'
         files = [('files', ('private.txt', content, 'text/plain'))]
         preflight = client.post('/api/library/upload', headers=headers, files=files)
         assert preflight.status_code == 200
         assert client.get('/api/library', headers=headers).json() == []
         review = preflight.json()['files'][0]
         assert review['flags']
+        assert review['upload_name'] == 'private.txt'
         assert client.post('/api/library/upload', headers=headers, files=files, data={'proceed':'true'}).status_code == 409
-        import json
-        result = client.post('/api/library/upload', headers=headers, files=files, data={'proceed':'true', 'deid_keep':json.dumps({'private.txt':[f['id'] for f in review['flags']]})})
+        decisions = {flag['id']: ('remove' if flag['kind'] == 'Possible patient name' else 'keep') for flag in review['flags']}
+        result = client.post('/api/library/upload', headers=headers, files=files, data={
+            'proceed':'true', 'deid_decisions':json.dumps({'private.txt': decisions})
+        })
         assert result.status_code == 200
         document_id = result.json()['documents'][0]['id']
         assert client.get('/api/status', headers=headers).json()['chunks'] == 1
+        indexed_text = app.state.vault.index[0]['text']
+        assert 'Maria Santos' not in indexed_text
+        assert '[removed]' in indexed_text
+        assert 'clinic@example.com' in indexed_text
         assert b'Maria Santos' not in (tmp_path/'vault.sqlite3').read_bytes()
         assert client.post('/api/library/reindex', headers=headers).json()['chunks_indexed'] == 1
         assert client.delete(f'/api/library/{document_id}', headers=headers).status_code == 200

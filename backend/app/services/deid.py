@@ -26,6 +26,31 @@ def scan(text: str, field: str = '') -> list[dict]:
     return result
 
 
+def redact_flagged(text: str, flags: list[dict], removed_ids: set[str], replacement: str = '[removed]') -> str:
+    """Replace selected findings while handling overlapping detector matches safely."""
+    ranges = []
+    for flag in flags:
+        if flag.get('id') not in removed_ids:
+            continue
+        start, end = flag.get('start'), flag.get('end')
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text):
+            ranges.append((start, end))
+    if not ranges:
+        return text
+
+    merged: list[list[int]] = []
+    for start, end in sorted(ranges):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+
+    redacted = text
+    for start, end in reversed(merged):
+        redacted = redacted[:start] + replacement + redacted[end:]
+    return redacted
+
+
 def scan_record(record: Record) -> list[dict]:
     result = []
     for key, value in record.model_dump().items():

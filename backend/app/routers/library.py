@@ -5,8 +5,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from app.dependencies import unlocked
 from app.schemas import AskInput, CompletenessInput
-from app.services.parsing import parse_file, chunk_pages
-from app.services.deid import scan
+from app.services.parsing import PageText, parse_file, chunk_pages
+from app.services.deid import redact_flagged, scan
 from app.services import llm
 from app.services.rag import valid_vectors, answer, retrieve, missing_items, citation
 
@@ -48,7 +48,8 @@ async def prepare_document(filename: str, pages, tag: str, sample: bool = False,
 
 @router.post('/library/upload')
 async def upload(vault=Depends(unlocked), files: list[UploadFile] = File(...), tag: str = Form('notes'),
-                 ocr: bool = Form(False), proceed: bool = Form(False), deid_keep: str = Form('{}')):
+                 ocr: bool = Form(False), proceed: bool = Form(False), deid_keep: str = Form('{}'),
+                 deid_decisions: str = Form('{}')):
     token = vault.token
     if tag not in TAGS:
         raise HTTPException(422, 'Tag must be notes, guidelines or textbook.')
@@ -59,30 +60,60 @@ async def upload(vault=Depends(unlocked), files: list[UploadFile] = File(...), t
         if not isinstance(approvals, dict): raise ValueError()
     except (ValueError, TypeError):
         raise HTTPException(422, 'Invalid identifier review choices.') from None
+    try:
+        decisions = json.loads(deid_decisions)
+        if not isinstance(decisions, dict): raise ValueError()
+    except (ValueError, TypeError):
+        raise HTTPException(422, 'Invalid identifier review decisions.') from None
     parsed = []
     reviews = []
     total = 0
     for file in files:
-        filename = bounded_filename(file.filename or 'document')
+        upload_name = Path(file.filename or 'document').name
+        filename = bounded_filename(upload_name)
         content = await file.read(20 * 1024 * 1024 + 1)
         total += len(content)
         if len(content) > 20 * 1024 * 1024 or total > 30 * 1024 * 1024:
             raise HTTPException(413, 'Limit: 20 MB per file and 30 MB combined.')
         pages = parse_file(filename, content, ocr)
         flagged = scan(filename, 'filename') + [dict(flag, page=page.page) for page in pages for flag in scan(page.text, f'page:{page.page}')]
-        parsed.append((filename, pages))
-        reviews.append({'filename': filename, 'flags': flagged, 'pages': len(pages), 'chunks': len(chunk_pages(pages, filename))})
+        parsed.append((filename, pages, flagged))
+        reviews.append({'filename': filename, 'upload_name': upload_name, 'flags': flagged,
+                        'pages': len(pages), 'chunks': len(chunk_pages(pages, filename))})
     if not proceed:
         return {'needs_review': True, 'files': reviews, 'notice': 'Warning aid only, not a de-identification guarantee. No files have been indexed or saved.'}
+    validated = {}
     for review in reviews:
-        choices = approvals.get(review['filename'], [])
-        if not isinstance(choices, list) or any(flag['id'] not in choices for flag in review['flags']):
-            raise HTTPException(409, 'Review identifiers for every included file before indexing. Cancel or exclude files you do not want to keep.')
+        filename = review['filename']
+        expected = {flag['id'] for flag in review['flags']}
+        if filename in decisions:
+            choices = decisions[filename]
+            if not isinstance(choices, dict):
+                raise HTTPException(422, 'Invalid identifier review decisions.')
+            if set(choices) != expected or any(value not in {'keep', 'remove'} for value in choices.values()):
+                raise HTTPException(409, 'Choose Keep or Remove for every possible identifier before indexing.')
+            validated[filename] = choices
+            continue
+
+        # Older clients sent a list where every reviewed ID meant Keep.
+        legacy_choices = approvals.get(filename, [])
+        if not isinstance(legacy_choices, list) or set(legacy_choices) != expected:
+            raise HTTPException(409, 'Choose Keep or Remove for every possible identifier before indexing.')
+        validated[filename] = {flag_id: 'keep' for flag_id in expected}
     items = []
     chunks = []
     documents = []
-    for filename, pages in parsed:
-        document, pieces = await prepare_document(filename, pages, tag, vault=vault, token=token)
+    for filename, pages, flags in parsed:
+        removed_ids = {flag_id for flag_id, choice in validated[filename].items() if choice == 'remove'}
+        filename_flags = [flag for flag in flags if flag.get('field') == 'filename']
+        indexed_filename = redact_flagged(filename, filename_flags, removed_ids)
+        redacted_pages = []
+        for page in pages:
+            page_flags = [flag for flag in flags if flag.get('field') == f'page:{page.page}']
+            text = redact_flagged(page.text, page_flags, removed_ids)
+            heading = next((line.strip()[:120] for line in text.splitlines() if line.strip()), '')
+            redacted_pages.append(PageText(page.page, text, heading or 'Document', page.location_type))
+        document, pieces = await prepare_document(indexed_filename, redacted_pages, tag, vault=vault, token=token)
         documents.append(document)
         items.append(('document', document)); items.extend(('chunk', piece) for piece in pieces)
         chunks.extend(pieces)
