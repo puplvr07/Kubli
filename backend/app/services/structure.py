@@ -27,7 +27,7 @@ def quote_supported(value: str, text: str) -> bool:
 
 def stated_numbers(text: str, field: str) -> list[float]:
     labels = {
-        'age': r'(?:age\s*[:=]?\s*|(?<!\d))(-?\d+(?:\.\d+)?)\s*(?:years?\s*old|[ -]?year[ -]old|yo\b|y/o\b)',
+        'age': r'(?:\bage\s*(?:(?:is|[:=])\s*)?(-?\d+(?:\.\d+)?)|(?<!\d)(-?\d+(?:\.\d+)?)\s*(?:years?\s*old|[ -]?year[ -]old|yo\b|y/o\b))',
         'hr': r'\b(?:hr|heart rate|pulse)\s*[:=]?\s*(-?\d+(?:\.\d+)?)',
         'rr': r'\b(?:rr|respiratory rate|respirations)\s*[:=]?\s*(-?\d+(?:\.\d+)?)',
         'temp_c': r'\b(?:temp(?:erature)?(?:_c)?)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*°?\s*(?:C\b|Celsius\b)',
@@ -41,7 +41,8 @@ def stated_numbers(text: str, field: str) -> list[float]:
             continue
         if re.match(r'(?:\d|\.\d|,\d|[eE][-+]?\d)', text[match.end():]):
             continue
-        values.append(float(match.group(1)))
+        value = next(group for group in match.groups() if group is not None)
+        values.append(float(value))
     return sorted(set(values))
 
 

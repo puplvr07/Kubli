@@ -128,6 +128,7 @@ def test_explicit_numbers_recovered_and_ambiguous_or_family_values_empty():
     result = grounded(record, '28-year-old female. BP 118/76. HR 88. RR 18. Temperature 36.8 C. SpO2 98%.')
     assert result.record.patient.age == 28 and result.record.vitals.hr == 88
     assert result.record.vitals.bp == '118/76'
+    assert grounded(record, 'Age is 18, sex is male.').record.patient.age == 18
     result = grounded(record, 'HR 88 then HR 90. Mother is 45-year-old, BP 120/80.')
     assert result.record.vitals.hr is None and result.record.vitals.bp is None and result.record.patient.age is None
     assert grounded(record, 'BP 16/10 kPa.').record.vitals.bp is None
