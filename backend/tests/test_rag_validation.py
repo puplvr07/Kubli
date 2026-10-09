@@ -5,7 +5,7 @@ import pytest
 
 from app.schemas import RAGModelResponse, RAGResponse
 from app.services import llm
-from app.services.rag import NOT_COVERED, answer, source_evidence
+from app.services.rag import NOT_COVERED, _exact_passage, answer, source_evidence
 from app.services.store import Vault
 
 
@@ -25,6 +25,34 @@ def make_chunk() -> dict:
         'filename': 'science.txt', 'page': 1, 'heading': 'Aurora', 'tag': 'textbook',
         'embedding': [1.0, 0.0], 'embedding_model': llm.EMBEDDING_PROFILE,
     }
+
+
+def test_exact_passage_keeps_pdf_wrapped_sentence_and_neighboring_context():
+    source = (
+        'A secondary headache is caused by another underlying condition. '
+        'These types of headache come from conditions that affect the\n'
+        'brain, neck, or other structures. Symptoms depend on the underlying cause. '
+        'An unrelated appendix begins here.'
+    )
+    result = _exact_passage(
+        source,
+        'What is a secondary headache?',
+        'It comes from a condition affecting the brain, neck, or other structures.',
+    )
+    assert result in source
+    assert 'A secondary headache is caused by another underlying condition.' in result
+    assert 'affect the\nbrain, neck, or other structures.' in result
+    assert 'Symptoms depend on the underlying cause.' in result
+    assert 'An unrelated appendix' not in result
+
+
+def test_exact_passage_bounds_an_unusually_long_sentence_verbatim():
+    source = 'Background ' + ('context ' * 120) + 'secondary headache cause remains documented.'
+    result = _exact_passage(source, 'What is the secondary headache cause?',
+                            'The secondary headache cause is documented.')
+    assert result in source
+    assert len(result) <= 700
+    assert 'secondary headache cause' in result
 
 
 def test_empty_object_retries_then_model_error(monkeypatch):

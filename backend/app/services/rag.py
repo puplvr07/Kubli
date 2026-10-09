@@ -85,25 +85,61 @@ def _retrieval_debug(chunks: list[dict], metadata: dict | None = None) -> dict:
 
 
 def _exact_passage(source: str, question: str, model_answer: str, max_chars: int = 700) -> str:
-    """Choose a relevant verbatim span; generated prose is never returned as an answer."""
-    spans = []
-    for pattern in (r'[^\n]+', r'[^.!?\n]+(?:[.!?]+|$)'):
-        for match in re.finditer(pattern, source):
-            value = match.group(0).strip()
-            if value and value not in spans:
-                spans.append(value)
-    if not spans:
+    """Choose a relevant verbatim passage, preserving sentences wrapped across PDF lines."""
+    matches = list(re.finditer(r'\S[\s\S]*?(?:[.!?]+(?=\s|$)|\Z)', source))
+    if not matches:
         return ''
     question_terms = terms(question)
     answer_terms = terms(model_answer)
-    best = max(spans, key=lambda value: (
-        3 * len(terms(value) & answer_terms) + 2 * len(terms(value) & question_terms),
-        min(len(value), max_chars),
+
+    def relevance(value: str) -> tuple[int, int]:
+        value_terms = terms(value)
+        return (
+            3 * len(value_terms & answer_terms) + 2 * len(value_terms & question_terms),
+            len(value_terms & question_terms),
+        )
+
+    best_index = max(range(len(matches)), key=lambda index: (
+        *relevance(matches[index].group(0)),
+        min(len(matches[index].group(0)), max_chars),
     ))
-    if len(best) <= max_chars:
-        return best
-    boundary = best.rfind(' ', 0, max_chars + 1)
-    return best[:boundary if boundary > max_chars // 2 else max_chars].rstrip()
+    best = matches[best_index]
+    start, end = best.start(), best.end()
+
+    # Include the neighboring sentences when they fit. This supplies enough context for
+    # definitions and prevents a PDF's visual line wrapping from becoming the answer boundary.
+    neighbors = [index for index in (best_index - 1, best_index + 1)
+                 if 0 <= index < len(matches)]
+    neighbors.sort(key=lambda index: (
+        *relevance(matches[index].group(0)),
+        index < best_index,
+    ), reverse=True)
+    for index in neighbors:
+        candidate_start = min(start, matches[index].start())
+        candidate_end = max(end, matches[index].end())
+        if candidate_end - candidate_start <= max_chars:
+            start, end = candidate_start, candidate_end
+
+    passage = source[start:end].strip()
+    if len(passage) <= max_chars:
+        return passage
+
+    # A single unusually long sentence still needs a bounded, verbatim window.
+    anchors = answer_terms or question_terms
+    positions = [match.start() for term in anchors
+                 for match in re.finditer(rf'\b{re.escape(term)}\b', passage, re.I)]
+    center = min(positions) if positions else 0
+    window_start = max(0, min(center - max_chars // 3, len(passage) - max_chars))
+    if window_start:
+        boundary = passage.find(' ', window_start, min(len(passage), window_start + 80))
+        if boundary >= 0:
+            window_start = boundary + 1
+    window_end = min(len(passage), window_start + max_chars)
+    if window_end < len(passage):
+        boundary = passage.rfind(' ', window_start, window_end)
+        if boundary > window_start + max_chars // 2:
+            window_end = boundary
+    return passage[window_start:window_end].strip()
 
 
 def source_evidence(chunks: list[dict], question: str) -> list[dict]:
