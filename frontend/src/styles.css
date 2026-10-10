@@ -120,7 +120,7 @@ button, input, textarea, select { scroll-margin-top: 88px; }
 }
 @media (max-width: 1023px) {
   .app-frame > div > aside { padding: 10px 16px; }
-  .app-frame > div > aside nav { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; overflow: visible; }
+  .app-frame > div > aside nav { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px; overflow: visible; }
   .app-frame > div > aside nav button { min-width: 0; min-height: 52px; white-space: normal; line-height: 1.25; justify-content: center; text-align: center; }
 }
 @media (min-width: 641px) and (max-width: 1023px) {
@@ -169,3 +169,10 @@ button, input, textarea, select { scroll-margin-top: 88px; }
   .welcome-details > p:last-child { margin-top: 18px; }
 }
 @media (max-width: 640px) { .app-header { height: 66px; } .brand-wordmark { font-size: 1.3rem; } }
+
+@media print {
+  body * { visibility: hidden !important; }
+  .recovery-key-print, .recovery-key-print * { visibility: visible !important; }
+  .recovery-key-print { position: absolute; inset: 24px; display: block; background: white; color: black; }
+  .recovery-key-print > section { max-width: none; border: 1px solid #444; box-shadow: none; }
+}

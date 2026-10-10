@@ -47,7 +47,17 @@ npm ci --prefix frontend
 npm run build --prefix frontend
 ```
 
-Windows: activate using `.venv\Scripts\activate`; run the backend/frontend in separate terminals. The supplied cloud setup is Linux amd64.
+Windows PowerShell, from the repository root:
+
+```powershell
+py -m venv .venv
+& .\.venv\Scripts\Activate.ps1
+python -m pip install -r .\backend\requirements.txt
+npm ci --prefix frontend
+npm run build --prefix frontend
+```
+
+Run the backend and frontend in separate terminals. The supplied cloud setup is Linux amd64.
 
 Start Ollama in its own terminal (or use its desktop service). Keep it bound to loopback and do not enable debug logging:
 
@@ -91,11 +101,39 @@ Terminal 2, from the repository root:
 NPM_CONFIG_UPDATE_NOTIFIER=false npm run preview --prefix frontend
 ```
 
+On Windows PowerShell, Terminal 1 can use the portable launcher, which resolves the virtual environment and local Whisper model relative to the repository:
+
+```powershell
+.\start_backend.ps1
+```
+
+If local script execution is restricted, run it for this process only:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start_backend.ps1
+```
+
+In Terminal 2:
+
+```powershell
+$env:NPM_CONFIG_UPDATE_NOTIFIER = 'false'
+npm run preview --prefix frontend
+```
+
 Open **`http://127.0.0.1:5173`** in a current browser. The backend always binds to **127.0.0.1:8000**. Use the exact `127.0.0.1` frontend origin; a `localhost` alias, custom origin, or LAN address is deliberately rejected by CORS/origin checks.
 
 For frontend development use `NPM_CONFIG_UPDATE_NOTIFIER=false npm run dev --prefix frontend` instead of preview. HMR and its injected websocket client are disabled to preserve the strict local-backend-only `connect-src` policy; reload the page after changes. Never run preview and dev on the same port simultaneously. After frontend edits, rebuild before using preview.
 
-On first launch, choose a password of at least ten characters. There is no password recovery. The app stores a salt and an encrypted known verifier, not your password or a password hash. Unlocking returns an in-memory session token; the frontend does not persist it to browser storage. Closing/refreshing the frontend requires another unlock.
+On first launch, choose a password or passphrase of at least 12 characters. The app then offers an optional 256-bit recovery key. Store that one-time Base32 key somewhere private and separate from the device; the app stores only an encrypted wrapper and cannot display the key again. If recovery is declined, the app warns that forgotten-password recovery is impossible. Unlocking returns an in-memory session token; the frontend does not persist it to browser storage. Closing or refreshing the frontend requires another unlock.
+
+### Password recovery
+
+1. At initial setup, choose **Create recovery key**, then copy or print the one-time key and confirm that it was stored safely. Choosing **Continue without recovery** is allowed but leaves no forgotten-password path.
+2. If the password is forgotten, select **Forgot password? Use recovery key** on the lock screen. Enter the recovery key and a new password of at least 12 characters.
+3. Recovery immediately invalidates the old password and old recovery key. Generate and store the offered replacement key to retain a recovery path.
+4. While unlocked, open **Recovery** in the sidebar to create a key after previously declining or to regenerate it. Regeneration requires the current password and invalidates the old key immediately.
+
+Recovery attempts are throttled with an increasing delay stored in the local vault. A checksum catches common recovery-key typing errors before decryption. Passwords and recovery keys are never stored or logged.
 
 Supported environment variables (set before starting the backend):
 
@@ -117,7 +155,7 @@ CPU int8 is enforced for STT. Ollama's host is fixed in application code to loop
 ## Workflow
 
 1. Type an encounter, or **Dictate encounter → Stop**. Correct the editable transcript.
-2. Optionally highlight a term or short phrase (up to 80 characters) inside the **Patient encounter notes** textbox and click **Look up in library**. A verified result is an exact local source excerpt with a citation; uncertain matches stay labeled as potential passages.
+2. Optionally highlight a term or short phrase (up to 80 characters) inside the **Patient encounter notes** textbox and click **Look up in library**. This performs a deterministic exact-phrase scan of the unlocked local index, favors definition-like sentences, and returns a verbatim cited passage or **Not covered by your library** without calling the answer model.
 3. Click **Structure from text**. Missing data remains null / Not stated. The model gets a strict JSON schema and one retry for invalid output. A deterministic source check removes unsupported excerpts, stripped qualifiers, and ungrounded vitals.
 4. Review or edit **every** amber field. Numeric warnings need explicit source confirmation. These are plausibility checks, not prescribing/lab interpretation.
 5. Remove identifier warnings (recommended), or explicitly choose **Keep**. The heuristic scan is a warning aid, not an anonymization guarantee.
@@ -151,7 +189,7 @@ npm run build --prefix frontend
 npm audit --prefix frontend
 ```
 
-Ordinary tests use controlled local-model responses to exercise failure handling and grounding. They test numeric boundaries, identifier regexes, wrong-password failure, per-payload salts and authenticated metadata, encrypted chunks/records, index rebuild at unlock, page-preserving parsing/chunking, embedding-first retrieval, malformed/truncated output, citation validation, explicit-save gates, PDF text/pages, blocked external sockets, local-only STT configuration, and missing-model errors. Real-model tests are opt-in; skipping them does **not** verify inference.
+Ordinary tests use controlled local-model responses to exercise failure handling and grounding. They test numeric boundaries, identifier regexes, password and recovery failure, recovery checksums and throttling, DEK-wrapper tampering, legacy-vault migration and rollback, per-payload salts and authenticated metadata, encrypted chunks/records, index rebuild at unlock, page-preserving parsing/chunking, embedding-first retrieval, malformed/truncated output, citation validation, explicit-save gates, PDF text/pages, blocked external sockets, local-only STT configuration, and missing-model errors. Real-model tests are opt-in; skipping them does **not** verify inference.
 
 After Ollama is running and both models are pulled:
 
@@ -165,7 +203,7 @@ Whisper accuracy requires testing with your own fictional multilingual recording
 
 ### Validation in the cloud workspace
 
-All 35 backend tests passed with live-model checks enabled; the frontend production build, dependency checks, and real Chromium UI checks also passed. Browser checks exercised unlock, individual review, explicit save, PDF download, upload review, missing embedding-model errors, source refusal, locking and wrong-password handling, with no external browser requests or CSP violations. Actual MediaRecorder WebM audio also passed through the restricted local decoder and Whisper transcription. Optional OCR was exercised with an in-memory sample image.
+The ordinary backend suite and frontend production build are the required local checks. Opt-in live-model and browser checks require the separately prepared local models and browser permissions; a skipped live test does not verify inference, audio hardware, or OCR installation.
 
 Real local Qwen structuring and nomic-backed cited Q&A passed the opt-in integration checks. Multilingual Whisper small was downloaded, SHA-256 verified, and exercised on public English reference audio with the external-socket guard active. Real Tesseract OCR also passed on an in-memory synthetic image. Runtime ONNX telemetry is explicitly disabled; PyAV 14.2 and ONNX Runtime 1.22 are pinned for the tested speech pipeline.
 
@@ -177,8 +215,11 @@ Initial model downloads were denied by the cloud egress policy. After adding the
 - The fixed frontend origin, loopback peer/Host checks, in-memory bearer sessions, and strict CSP restrict browser access. There are no CDN assets, analytics, remote fonts, service workers, or automatic update checks. Icons and fonts are bundled.
 - LLM and uploaded text are untrusted. SOAP validation uses strict Pydantic types, explicit numeric evidence and verbatim-source checks. Unambiguous labeled numeric values are recovered deterministically even if the model omitted them; competing values stay empty. Assessment/plan require explicit source labels; unsupported content is removed with a warning. This conservatively favors empty fields over guesses. It does not prove semantic fidelity; review remains mandatory.
 - Physiologic ranges: HR 20–250; SpO2 50–100%; temperature 30–43 °C; RR 4–60; BP systolic 50–300 / diastolic 20–200, with systolic above diastolic. Dose and recognized lab numbers always require confirmation; the tool never determines an appropriate dose or interprets a lab.
-- AES-256-GCM uses a 32-byte key, fresh 16-byte payload salt and fresh 12-byte IV. PBKDF2-HMAC-SHA256 runs 600,000 rounds at the password boundary to derive the vault key. HKDF-SHA256 derives an independent key for each payload from that high-entropy vault key and payload salt; bucket/id are authenticated associated data. Existing WN01 payloads remain readable and are upgraded in place to WN02 after successful authentication. Only the derived vault key, never the password, remains in session memory.
-- The verifier is a small known encrypted blob. All sensitive list metadata is inside encrypted payloads. SQLite exposes only opaque UUIDs, bucket types, ciphertext lengths and counts. The master bytearray is overwritten and the index cleared at lock; Python cannot guarantee forensic erasure of every immutable temporary or OS swap page.
+- Vault content is encrypted with a random 256-bit data-encryption key (DEK). PBKDF2-HMAC-SHA256 runs 600,000 rounds with a per-vault salt at the password boundary; HKDF-SHA256 with the `kubli-kek-password-v1` purpose label derives a key-encryption key that wraps the DEK with AES-256-GCM. The password and its derived material are not stored.
+- The optional recovery key contains 256 random bits plus a checksum and is displayed as grouped Base32. HKDF-SHA256 with the distinct `kubli-kek-recovery-v1` label derives a second key-encryption key that wraps the same DEK. Only that wrapper is stored. Password recovery and recovery-key regeneration re-wrap the DEK, so vault content does not need bulk re-encryption.
+- Each content payload keeps the existing scheme: a fresh 16-byte salt and 12-byte IV, HKDF-SHA256 from the DEK with purpose-bound associated data, then AES-256-GCM. Bucket and opaque item ID are authenticated associated data. SQLite exposes settings needed for key derivation plus opaque UUIDs, bucket types, ciphertext lengths and counts; filenames, records, source text, and embeddings stay inside encrypted payloads.
+- On the first successful unlock of an older direct-password-key vault, TIBOQ authenticates and decrypts the old format, creates and integrity-checks `vault.sqlite3.pre-envelope-v1.bak`, then migrates all content and key settings in one SQLite transaction. A failure rolls the transaction back. WN01 content payloads remain readable and are upgraded to WN02 after authentication.
+- The in-session DEK uses a mutable bytearray and is overwritten on lock on a best-effort basis; the in-memory index is also cleared. Python cannot guarantee forensic erasure of every immutable temporary, clipboard copy, print spool, or OS swap page.
 - Access/error logs are disabled in the supported launcher; validation errors omit input values. The app never logs encounter text, passwords, transcripts or uploaded content. Do not add debug/request-body logging.
 
 ## Known limitations
@@ -189,7 +230,10 @@ Initial model downloads were denied by the cloud egress policy. After adding the
 - No unit conversion; age is years and temperature is Celsius. No clinical dose checking or diagnosis. Lab recognition is limited to common labeled values.
 - Identifier regexes can miss names, addresses, unusual dates, and other identifying details. A clean scan is not proof of anonymization.
 - Citation fidelity is deterministic; relevance still needs human judgment. Embedding retrieval can rank a semantically unrelated chunk among the top results, so the answer model still has to return a valid `not_covered` result when evidence is absent. Completeness recognizes explicit checklist lines and simple field/term coverage, so false positives/negatives are possible.
-- A single local vault/session is supported. Unlocking invalidates an earlier session. No multi-user management, password change/recovery, synchronization, backup UI, or official-record integrations.
+- A single local vault/session is supported. Unlocking invalidates an earlier session. Recovery can replace a forgotten password, but ordinary password change, multi-user management, synchronization, backup UI, and official-record integrations are not implemented.
+- Device binding is not implemented. Anyone who obtains a copy of the encrypted vault and knows the password or recovery key can attempt to unlock that copy. Recovery protects against a forgotten password; it does not protect a compromised logged-in device, clipboard, printout, keylogger, or malware.
+- Losing both the password and recovery key makes the encrypted data unrecoverable. A declined or discarded replacement key leaves no recovery path. The automatic pre-migration database copy is a migration rollback aid, not a user backup system.
+- The pre-migration backup remains encrypted under the password that was valid before migration. After confirming the migrated vault works and arranging your own trusted backup, remove that rollback copy if retaining an old-password-encrypted snapshot is not acceptable.
 - Locking discards unsaved drafts. Memory clearing is best effort; full-disk encryption and OS swap policy are outside the app's control.
 - Exported PDFs are **unencrypted**. One-page export reduces font size to a minimum of 8pt; oversized drafts or unsupported glyphs fail clearly instead of truncating content.
 - DOCX sections approximate locations; chunk token counts are estimates. Parsing is bounded, not a full sandbox for hostile documents. Local source parsing should use trusted files.

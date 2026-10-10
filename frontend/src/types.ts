@@ -11,7 +11,7 @@ export interface Citation { chunk_id: string; filename: string; page: number; he
 export interface LibraryDocument { id: string; title: string; tag: string; timestamp: string; chunks: number; sample: boolean }
 export interface SavedRecord { id: string; timestamp: string; chief_complaint: string | null }
 export interface Status {
-  initialized: boolean; unlocked: boolean; auto_lock_minutes: number
+  initialized: boolean; unlocked: boolean; auto_lock_minutes: number; recovery_configured: boolean
   backend_bind: string; outbound_policy: string; external_requests: number
   local_model_requests: number; llm_model: string; embedding_model: string; whisper_model: string
   documents: number | null; chunks: number | null; model_status?: string
