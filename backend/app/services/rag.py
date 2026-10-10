@@ -76,6 +76,91 @@ def citation(chunk: dict, snippet: str) -> dict:
             'quote': snippet, 'snippet': snippet, 'context': chunk['text']}
 
 
+def _term_pattern(term: str) -> re.Pattern:
+    parts = term.strip().split()
+    if not parts:
+        raise ValueError('Term cannot be blank.')
+    return re.compile(r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in parts) + r'(?!\w)', re.I)
+
+
+def _term_passage(source: str, term: str, max_chars: int = 700) -> tuple[str, int]:
+    """Return a verbatim passage containing the exact term and a definition-likelihood score."""
+    pattern = _term_pattern(term)
+    if not pattern.search(source):
+        return '', 0
+    sentences = list(re.finditer(r'\S[\s\S]*?(?:[.!?]+(?=\s|$)|\Z)', source))
+    if not sentences:
+        return '', 0
+
+    candidates = []
+    for index, sentence in enumerate(sentences):
+        value = sentence.group(0)
+        occurrences = len(pattern.findall(value))
+        if not occurrences:
+            continue
+        normalized = ' '.join(value.split())
+        follows_definition_cue = bool(re.search(
+            pattern.pattern + r'\s+(?:is|means|refers\s+to|describes|occurs\s+when|happens\s+when|stands\s+for)\b',
+            normalized,
+            re.I,
+        ))
+        asks_definition = bool(re.search(r'\bwhat\s+is\s+(?:a\s+|an\s+|the\s+)?' + pattern.pattern, normalized, re.I))
+        quality = 20 if follows_definition_cue else 10 if asks_definition else 1
+        candidates.append((quality, occurrences, min(len(value), max_chars), index))
+
+    quality, _, _, best_index = max(candidates)
+    best = sentences[best_index]
+    start, end = best.start(), best.end()
+
+    # Definitions often continue for another sentence or two. Preserve those sentences
+    # exactly while keeping the response short enough to review in the workspace.
+    for index in range(best_index + 1, min(best_index + 3, len(sentences))):
+        if sentences[index].end() - start > max_chars:
+            break
+        end = sentences[index].end()
+    passage = source[start:end].strip()
+    if len(passage) <= max_chars:
+        return passage, quality
+
+    match = pattern.search(passage)
+    center = match.start() if match else 0
+    window_start = max(0, min(center - max_chars // 3, len(passage) - max_chars))
+    if window_start:
+        boundary = passage.find(' ', window_start, min(len(passage), window_start + 80))
+        if boundary >= 0:
+            window_start = boundary + 1
+    window_end = min(len(passage), window_start + max_chars)
+    if window_end < len(passage):
+        boundary = passage.rfind(' ', window_start, window_end)
+        if boundary > window_start + max_chars // 2:
+            window_end = boundary
+    return passage[window_start:window_end].strip(), quality
+
+
+def lookup_term(vault, term: str, scope: list[str], token: str) -> dict:
+    """Find an exact local-library term passage without invoking a generative model."""
+    vault.authorize(token, touch=False)
+    normalized_term = ' '.join(term.split())
+    if not normalized_term:
+        return {'status': 'not_covered', 'answer': NOT_COVERED, 'citations': []}
+
+    candidates = []
+    for chunk in vault.index:
+        if chunk['tag'] not in scope:
+            continue
+        passage, quality = _term_passage(chunk['text'], normalized_term)
+        if not passage:
+            continue
+        heading_match = int(bool(_term_pattern(normalized_term).search(chunk.get('heading', ''))))
+        occurrences = len(_term_pattern(normalized_term).findall(chunk['text']))
+        candidates.append((quality, heading_match, occurrences, chunk, passage))
+
+    if not candidates:
+        return {'status': 'not_covered', 'answer': NOT_COVERED, 'citations': []}
+    _, _, _, chunk, passage = max(candidates, key=lambda item: item[:3])
+    return {'status': 'answered', 'answer': passage, 'citations': [citation(chunk, passage)]}
+
+
 def _retrieval_debug(chunks: list[dict], metadata: dict | None = None) -> dict:
     debug = {'retrieved': [{'chunk_id': chunk['id'], 'similarity': round(chunk['similarity'], 6)}
                            for chunk in chunks]}

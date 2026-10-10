@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from app.dependencies import unlocked
-from app.schemas import AskInput, CompletenessInput
+from app.schemas import AskInput, CompletenessInput, TermLookupInput
 from app.services.parsing import PageText, parse_file, chunk_pages
 from app.services.deid import redact_flagged, scan
 from app.services import llm
-from app.services.rag import valid_vectors, answer, retrieve, missing_items, citation
+from app.services.rag import valid_vectors, answer, retrieve, missing_items, citation, lookup_term
 
 router = APIRouter(prefix='/api')
 TAGS = {'notes', 'guidelines', 'textbook'}
@@ -153,6 +153,10 @@ async def reindex(vault=Depends(unlocked)):
 @router.post('/library/ask')
 async def ask(body: AskInput, vault=Depends(unlocked)):
     return await answer(vault, body.question, body.scope, vault.token)
+
+@router.post('/library/lookup-term')
+def term_lookup(body: TermLookupInput, vault=Depends(unlocked)):
+    return lookup_term(vault, body.term, body.scope, vault.token)
 
 @router.post('/completeness')
 async def completeness(body: CompletenessInput, vault=Depends(unlocked)):
