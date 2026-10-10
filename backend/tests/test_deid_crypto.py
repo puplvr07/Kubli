@@ -7,7 +7,7 @@ from cryptography.exceptions import InvalidTag
 from fastapi import HTTPException
 from app.services.crypto import LEGACY_MAGIC, MAGIC, decrypt, derive, encrypt, password_key
 from app.services.deid import scan, scan_record
-from app.services.store import TEST_BLOB, Vault
+from app.services.store import Vault
 from app.schemas import empty_record
 
 
@@ -50,8 +50,6 @@ def test_vault_locked_wrong_password_and_index_rebuild(tmp_path):
     vault.put_many([('record', record), ('chunk', chunk)])
     key = vault.key()
     with vault.db:
-        vault.db.execute("UPDATE settings SET value=? WHERE name='verifier'",
-                         (legacy_encrypt(key, TEST_BLOB, b'verifier'),))
         vault.db.execute('UPDATE payloads SET data=? WHERE id=?',
                          (legacy_encrypt(key, json.dumps(record).encode(), b'record:r1'), 'r1'))
         vault.db.execute('UPDATE payloads SET data=? WHERE id=?',
@@ -66,7 +64,7 @@ def test_vault_locked_wrong_password_and_index_rebuild(tmp_path):
     assert vault.index[0]['embedding'] == [0.1, 0.2]
     assert vault.db.execute("SELECT data FROM payloads WHERE id='c1'").fetchone()[0].startswith(MAGIC)
     assert vault.db.execute("SELECT data FROM payloads WHERE id='r1'").fetchone()[0].startswith(MAGIC)
-    assert vault.db.execute("SELECT value FROM settings WHERE name='verifier'").fetchone()[0].startswith(MAGIC)
+    assert vault.db.execute("SELECT value FROM settings WHERE name='format_version'").fetchone()[0] == b'2'
     assert b'private symptom' not in vault.path.read_bytes()
     assert b'private text' not in vault.path.read_bytes()
     vault.last_activity = time.monotonic() - 301

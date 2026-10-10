@@ -8,7 +8,8 @@ from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from app.schemas import StructureInput, StructureResult, UnlockInput
+from app.schemas import (StructureInput, StructureResult, UnlockInput, RecoverySetupInput,
+                         RecoveryRegenerateInput, RecoverInput)
 from app.services.structure import structure
 from app.services.store import Vault
 from app.services import llm, network
@@ -85,6 +86,12 @@ async def privacy_boundary(request: Request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path == '/api/vault/recover':
+        return JSONResponse(status_code=422, content={'detail': 'Enter a valid recovery key and a new password of at least 12 characters.'})
+    if request.url.path.startswith('/api/vault/recovery/'):
+        return JSONResponse(status_code=422, content={'detail': 'Invalid recovery settings request.'})
+    if request.url.path == '/api/unlock':
+        return JSONResponse(status_code=422, content={'detail': 'Enter a valid vault password.'})
     return JSONResponse(status_code=422, content={'detail': 'Invalid fields. Use the complete record schema, numeric values for vitals, and explicit confirmation when saving.'})
 
 @app.exception_handler(llm.ModelGenerationError)
@@ -113,8 +120,27 @@ async def unexpected_error(request: Request, exc: Exception):
 
 @app.post('/api/unlock')
 def unlock_endpoint(body: UnlockInput, request: Request):
-    token = request.app.state.vault.unlock(body.password)
-    return {'token': token, 'auto_lock_minutes': request.app.state.vault.auto_lock_minutes}
+    vault = request.app.state.vault
+    token = vault.unlock(body.password)
+    return {'token': token, 'auto_lock_minutes': vault.auto_lock_minutes,
+            'created': vault.last_unlock_created, 'recovery_configured': vault.recovery_configured,
+            'recovery_prompt': vault.recovery_prompt}
+
+@app.post('/api/vault/recovery/setup')
+def recovery_setup(body: RecoverySetupInput, vault=Depends(unlocked)):
+    recovery_key = vault.setup_recovery(body.enabled)
+    return {'configured': vault.recovery_configured, 'recovery_key': recovery_key}
+
+@app.post('/api/vault/recovery/regenerate')
+def recovery_regenerate(body: RecoveryRegenerateInput, vault=Depends(unlocked)):
+    return {'configured': True, 'recovery_key': vault.regenerate_recovery(body.current_password)}
+
+@app.post('/api/vault/recover')
+def recover_vault(body: RecoverInput, request: Request):
+    token, recovery_key = request.app.state.vault.recover(
+        body.recovery_key, body.new_password, body.generate_new_recovery)
+    return {'token': token, 'recovery_configured': recovery_key is not None,
+            'recovery_key': recovery_key}
 
 @app.post('/api/lock')
 def lock_endpoint(vault=Depends(unlocked)):
@@ -133,6 +159,7 @@ def status_endpoint(request: Request):
     authorized = bool(vault.token and auth and __import__('secrets').compare_digest(auth, vault.token))
     docs = vault.list('document') if authorized else []
     return {'initialized': vault.initialized, 'unlocked': authorized, 'auto_lock_minutes': vault.auto_lock_minutes,
+            'recovery_configured': vault.recovery_configured,
             'backend_bind': '127.0.0.1:8000', 'outbound_policy': 'Fixed loopback Ollama only; STT local_files_only. No telemetry or external HTTP routes.',
             'external_requests': 0, 'blocked_external_connections': network.blocked_connections, 'socket_guard': network.installed, 'local_model_requests': llm.local_requests, 'llm_model': llm.MODEL,
             'embedding_model': llm.EMBED_MODEL, 'whisper_model': os.getenv('WHISPER_MODEL', 'small'),

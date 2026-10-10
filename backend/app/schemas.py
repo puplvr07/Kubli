@@ -1,5 +1,5 @@
 from typing import Literal, Self
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, model_validator
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, allow_inf_nan=False, str_max_length=30000)
@@ -40,6 +40,17 @@ class StructureResult(StrictModel):
 
 class UnlockInput(StrictModel):
     password: str = Field(min_length=1, max_length=1024)
+
+class RecoverySetupInput(StrictModel):
+    enabled: StrictBool
+
+class RecoveryRegenerateInput(StrictModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+
+class RecoverInput(StrictModel):
+    recovery_key: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=1024)
+    generate_new_recovery: StrictBool = True
 
 class DeidInput(StrictModel):
     text: str = Field(max_length=100000)
