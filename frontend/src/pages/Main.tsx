@@ -8,6 +8,8 @@ import VoiceRecorder from '../components/VoiceRecorder'
 export default function Main({ demo, refresh }: { demo: boolean; refresh: () => void }) {
   const [voiceKey, setVoiceKey] = useState(0)
   const [text, setText] = useState(''); const [record, setRecord] = useState<RecordDraft>(blankRecord)
+  const [draftReady, setDraftReady] = useState(false); const [structuredText, setStructuredText] = useState('')
+  const [reviewedRecord, setReviewedRecord] = useState<RecordDraft | null>(null)
   const [pending, setPending] = useState(new Set<string>()); const [warnings, setWarnings] = useState<Warning[]>([])
   const [modelWarnings, setModelWarnings] = useState<Warning[]>([]); const [flags, setFlags] = useState<DeidFlag[]>([])
   const [kept, setKept] = useState(new Set<string>()); const [ack, setAck] = useState(new Set<string>())
@@ -19,19 +21,22 @@ export default function Main({ demo, refresh }: { demo: boolean; refresh: () => 
   async function loadRecords() { try { setSaved(await api<SavedRecord[]>('/api/records')) } catch (e) { fail(e) } }
   useEffect(() => { void loadRecords() }, [])
   useEffect(() => {
-    const timer = setTimeout(() => { post<{flags: DeidFlag[]; warnings: Warning[]}>('/api/review', record).then(r => {setFlags(r.flags); setWarnings(r.warnings)}).catch(fail) }, 400)
-    return () => clearTimeout(timer)
+    let active = true
+    const timer = setTimeout(() => { post<{flags: DeidFlag[]; warnings: Warning[]}>('/api/review', record).then(r => {
+      if (active) {setFlags(r.flags); setWarnings(r.warnings); setReviewedRecord(record)}
+    }).catch(e => {if (active) fail(e)}) }, 400)
+    return () => {active = false; clearTimeout(timer)}
   }, [record])
   useEffect(() => {
     if (demo) {
       post<{text: string; record: RecordDraft}>('/api/demo/presentation', {}).then(sample => {
-        setText(sample.text); setRecord(sample.record); setPending(new Set(fields.filter(([p]) => valueAt(sample.record, p)).map(([p]) => p)))
+        setText(sample.text); setStructuredText(sample.text); setRecord(sample.record); setDraftReady(true); setPending(new Set(fields.filter(([p]) => valueAt(sample.record, p)).map(([p]) => p)))
         setNotice('Prewritten fictional demo draft loaded. Review it before saving.'); setSelected(null); setKept(new Set()); setAck(new Set())
       }).catch(fail)
     }
   }, [demo])
   function edit(next: RecordDraft, path: string) {
-    setRecord(next); setPending(prev => {const s = new Set(prev); s.delete(path); return s})
+    setRecord(next); setDraftReady(true); setPending(prev => {const s = new Set(prev); s.delete(path); return s})
     setKept(new Set()); setAck(new Set()); setSelected(null); setCompleteness([]); setCheckMessage(''); setNotice('')
     setModelWarnings(prev => prev.filter(w => w.field !== path))
   }
@@ -39,13 +44,13 @@ export default function Main({ demo, refresh }: { demo: boolean; refresh: () => 
     setBusy('structure'); setError(''); setNotice('')
     try {
       const result = await post<{record: RecordDraft; warnings: Warning[]}>('/api/structure', {text})
-      setRecord(result.record); setModelWarnings(result.warnings.filter(w => w.message.startsWith('Unsupported')))
+      setRecord(result.record); setDraftReady(true); setStructuredText(text); setModelWarnings(result.warnings.filter(w => w.message.startsWith('Unsupported')))
       setWarnings(result.warnings.filter(w => !w.message.startsWith('Unsupported')))
       setPending(new Set(fields.filter(([p]) => valueAt(result.record, p)).map(([p]) => p)))
       setKept(new Set()); setAck(new Set()); setSelected(null); setCompleteness([]); setCheckMessage('')
     } catch (e) { fail(e) } finally { setBusy('') }
   }
-  function clear() { setVoiceKey(prev => prev + 1); setText(''); setRecord(blankRecord()); setPending(new Set()); setWarnings([]); setFlags([]); setKept(new Set()); setAck(new Set()); setModelWarnings([]); setSelected(null); setNotice(''); setError(''); setCompleteness([]); setCheckMessage('') }
+  function clear() { setVoiceKey(prev => prev + 1); setText(''); setStructuredText(''); setRecord(blankRecord()); setDraftReady(false); setPending(new Set()); setWarnings([]); setFlags([]); setKept(new Set()); setAck(new Set()); setModelWarnings([]); setSelected(null); setNotice(''); setError(''); setCompleteness([]); setCheckMessage('') }
   async function confirmSave() {
     setBusy('save'); setError('')
     try {
@@ -71,13 +76,21 @@ export default function Main({ demo, refresh }: { demo: boolean; refresh: () => 
   } catch (e) { fail(e) } finally { setBusy('') } }
   async function openSaved(id: string) { setError(''); try {
     const result = await api<{record: RecordDraft}>(`/api/records/${id}`)
-    setText(''); setRecord(result.record); setPending(new Set()); setKept(new Set()); setAck(new Set()); setModelWarnings([]); setSelected(id); setNotice('Opened saved draft. Edits require a new Confirm and save.'); setCompleteness([])
+    setText(''); setStructuredText(''); setRecord(result.record); setDraftReady(true); setPending(new Set()); setKept(new Set()); setAck(new Set()); setModelWarnings([]); setSelected(id); setNotice('Opened saved draft. Edits require a new Confirm and save.'); setCompleteness([])
   } catch (e) { fail(e) } }
   async function removeSaved(id: string) { try { await api(`/api/records/${id}`, {method:'DELETE'}); setDeleteId(null); if(selected === id) clear(); await loadRecords(); refresh() } catch(e) { fail(e) } }
   const unresolved = flags.some(f => !kept.has(f.id)) || warnings.some(w => !ack.has(w.message))
+  const activeStep = busy === 'structure' ? 2 : text !== structuredText || !draftReady ? 1
+    : selected ? 5 : pending.size || unresolved || reviewedRecord !== record ? 3 : 4
+  const stepLabels = ['01 Capture', '02 Structure', '03 Review', '04 Confirm', '05 Save']
   return <>
     <div className="flex flex-wrap items-start justify-between gap-4 mb-7"><div><p className="eyebrow">ENCOUNTER WORKSPACE</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Make room for the encounter.</h1><p className="text-sm text-slate-500 mt-2">Capture what was said. Review what matters. Save when you're ready.</p></div><span className="bg-white border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-500">{demo ? 'Fictional demo' : 'Unsaved text stays in memory'}</span></div>
-    <div className="workflow-steps" aria-label="Encounter workflow"><span>01 Capture</span><span>02 Structure</span><span>03 Review</span><span>04 Confirm</span><span>05 Save</span></div>
+    <div className="workflow-steps" aria-label="Encounter workflow">{stepLabels.map((label, index) =>
+      <span key={label} aria-current={activeStep === index + 1 ? 'step' : undefined}
+        data-complete={index + 1 < activeStep ? 'true' : undefined}>
+        <span className="workflow-step-number">{label.slice(0, 2)}</span>{' '}
+        <span className="workflow-step-label">{label.slice(3)}</span>
+      </span>)}</div>
     {error && <div role="alert" className="error mb-5">{error}</div>}{notice && <div role="status" className="rounded-xl border border-teal-100 bg-teal-50 p-3 text-sm text-teal-800 mb-5">{notice}</div>}
     <div className="encounter-layout grid gap-5 items-start">
       <div className="space-y-5"><section className="panel p-5"><div className="flex items-center justify-between"><p className="eyebrow">01 · CAPTURE</p><FileText size={17} className="text-slate-400"/></div><h2 className="mt-3 text-lg font-semibold">Encounter notes</h2><p className="text-xs leading-relaxed text-slate-500 mt-2 mb-4">Type or dictate. Correct the transcript before structuring; missing facts stay empty.</p><VoiceRecorder key={voiceKey} disabled={!!busy} onTranscript={transcript => setText(prev => prev ? prev + '\n' + transcript : transcript)} onError={fail}/><label htmlFor="encounter" className="sr-only">Encounter text / editable transcript</label><textarea id="encounter" rows={12} value={text} maxLength={30000} onChange={e => setText(e.target.value)} placeholder="Begin with the presentation…"/><div className="flex justify-between text-[10px] text-slate-400 mt-2"><span>LOCAL PROCESSING ONLY</span><span>{text.length.toLocaleString()} / 30,000</span></div><button className="btn-primary w-full mt-5" disabled={!!busy || !text.trim()} onClick={structure}><WandSparkles size={16}/>{busy === 'structure' ? 'Structuring locally…' : 'Structure from text'}</button><p className="text-[11px] text-slate-400 leading-relaxed mt-3">AI can make mistakes. Amber fields require your review.</p></section>
